@@ -53,9 +53,18 @@ public class InterviewService {
 
     private static final Logger log = LoggerFactory.getLogger(InterviewService.class);
 
-    // 기술 면접관 한 명은 반드시 있어야 한다. 원질문을 다시 쓰는 몫이 그 자리라 대신할 면접관이 없다.
-    // 나머지 직책은 이만큼까지 붙일 수 있다 — 분석 서버 otherPersonas가 최대 4명이다.
-    private static final int MAX_OTHER_PERSONAS = 4;
+    /**
+     * N:1 면접의 기술 외 면접관 수.
+     *
+     * <p>기술 면접관 한 명은 반드시 있어야 한다. 원질문을 다시 쓰는 몫이 그 자리라 대신할 면접관이 없다.
+     * 나머지 직책은 정확히 이만큼이 붙어, N:1은 언제나 세 명이다.
+     *
+     * <p>인원이 곧 문항 수다. 기술 면접관이 두 문항, 나머지가 한 명당 두 문항을 맡아 N:1 면접은 여섯
+     * 문항으로 정해져 있다 — {@code QuestionTailorService.TECH_QUESTION_COUNT} 참고. 인원을 가변으로
+     * 두면 같은 N:1 면접인데 문항 수가 달라지므로, 늘리려면 문항 배분을 먼저 정하고 함께 바꾼다.
+     * (분석 서버 otherPersonas 자체는 네 명까지 받는다.)
+     */
+    private static final int OTHER_PERSONA_COUNT = 2;
 
     private final InterviewRepository interviewRepository;
     private final QuestionRepository questionRepository;
@@ -134,7 +143,9 @@ public class InterviewService {
      * 진행 순서를 정한다. 기술 면접관이 맨 앞이고 나머지는 요청 순서 그대로다.
      *
      * <p>기술 면접관이 없으면 다시 쓸 원질문을 맡을 사람이 없고, 같은 직책이 둘이면 슬롯이
-     * 겹쳐 면접이 성립하지 않는다. 둘 다 생성 시점에 막는다.
+     * 겹쳐 면접이 성립하지 않는다. 인원이 {@link #OTHER_PERSONA_COUNT}명에서 어긋나도 문항 수가
+     * 정해진 여섯에서 벗어난다. 셋 다 생성 시점에 막는다 — 여기를 지나면 질문을 만드는 쪽에서는
+     * 이미 구성이 맞다고 보고 문항을 나눈다.
      */
     private List<PersonaEntity> orderForMulti(List<PersonaEntity> personas) {
         List<PersonaEntity> tech = personas.stream()
@@ -147,9 +158,9 @@ public class InterviewService {
         List<PersonaEntity> others = personas.stream()
                 .filter(persona -> persona.getRole() != Role.TECH)
                 .toList();
-        if (others.isEmpty() || others.size() > MAX_OTHER_PERSONAS) {
+        if (others.size() != OTHER_PERSONA_COUNT) {
             throw BusinessException.unprocessable(
-                    "N:1 면접에는 기술 외 면접관을 1~" + MAX_OTHER_PERSONAS + "명 지정해야 합니다.");
+                    "N:1 면접에는 기술 외 면접관을 " + OTHER_PERSONA_COUNT + "명 지정해야 합니다.");
         }
 
         Set<Role> seen = EnumSet.noneOf(Role.class);

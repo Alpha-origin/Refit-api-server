@@ -124,14 +124,33 @@ class InterviewServiceMultiCreateTest {
     }
 
     @Test
-    void 기술_외_면접관은_한_명만_있어도_된다() {
+    void 기술_외_면접관이_한_명뿐이면_422다() {
+        // 인원이 곧 문항 수다. 두 명에서 하나라도 어긋나면 N:1이 정해진 여섯 문항으로 열리지 않는다.
         when(personaRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(12L, Role.HR)));
 
-        InterviewResponse response = service.createInterview("Bearer t",
-                new CreateInterviewRequest(null, null, List.of(11L, 12L)));
+        assertThatThrownBy(() -> service.createInterview("Bearer t",
+                new CreateInterviewRequest(null, null, List.of(11L, 12L))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
-        assertThat(response.getPersonaIds()).containsExactly(11L, 12L);
+        verify(interviewRepository, never()).save(any());
+    }
+
+    @Test
+    void 기술_외_면접관이_셋이면_422다() {
+        when(personaRepository.findAllById(List.of(11L, 12L, 13L, 15L))).thenReturn(List.of(
+                persona(11L, Role.TECH), persona(12L, Role.HR), persona(13L, Role.CEO),
+                persona(15L, Role.PM)));
+
+        assertThatThrownBy(() -> service.createInterview("Bearer t",
+                new CreateInterviewRequest(null, null, List.of(11L, 12L, 13L, 15L))))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+
+        verify(interviewRepository, never()).save(any());
     }
 
     @Test

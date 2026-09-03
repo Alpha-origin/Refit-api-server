@@ -72,7 +72,15 @@ public class QuestionTailorService {
     private static final int MAX_QUESTIONS = 10;
     private static final String STATUS_SUCCEEDED = "succeeded";
 
-    // 기술 면접관이 맡을 문항 수. 원질문 5개를 다 쓰면 다른 면접관 몫까지 더해져 면접이 너무 길어진다.
+    /**
+     * 1:1 면접의 문항 수.
+     *
+     * <p>분석 서버는 원질문을 몇 개 만들지 우리에게 맞춰주지 않는다. 그대로 흘려보내면 면접 길이가
+     * 분석 결과에 따라 들쭉날쭉해지므로, 넘기기 전에 앞에서부터 이만큼만 고른다.
+     */
+    private static final int SOLO_QUESTION_COUNT = 5;
+
+    // 기술 면접관이 맡을 문항 수. 원질문을 다 쓰면 다른 면접관 몫까지 더해져 면접이 너무 길어진다.
     private static final int TECH_QUESTION_COUNT = 2;
     // 기술 외 면접관 한 명이 맡을 문항 수. 분석 서버 기본값과 같다.
     private static final int OTHER_QUESTION_COUNT = 2;
@@ -162,7 +170,11 @@ public class QuestionTailorService {
             return requestMultiTailor(interview, user, source);
         }
 
-        List<TailoredQuestionResponse> sourceQuestions = source.questions();
+        // 면접에 실제로 쓸 만큼만 넘긴다. 여기서 고른 것이 그대로 sourceQuestions로 남아,
+        // 재작성이 실패해 원질문으로 되돌아가도 문항 수는 같다.
+        List<TailoredQuestionResponse> sourceQuestions = source.questions().stream()
+                .limit(SOLO_QUESTION_COUNT)
+                .toList();
         QuestionTailorRequest.Profile profile = resolveProfile(user, interview.getPersonaId());
 
         QuestionTailorAcceptedResponse accepted = aiServerClient.tailorQuestions(QuestionTailorRequest.builder()
@@ -192,8 +204,9 @@ public class QuestionTailorService {
      * <p>1:1과 달리 두 가지가 한 번에 돈다 — 기술 면접관이 쓸 원질문을 다시 쓰고, 나머지 면접관
      * 몫의 질문을 새로 만든다. 신규 질문의 근거는 프로젝트 요약뿐이라 그것까지 실어 보낸다.
      *
-     * <p>원질문을 전부 넘기지는 않는다. 5개를 다 쓰면 다른 면접관 몫이 더해져 면접이 너무 길어진다.
-     * 앞에서부터 {@link #TECH_QUESTION_COUNT}개만 고른다.
+     * <p>원질문을 전부 넘기지는 않는다. 다 쓰면 다른 면접관 몫이 더해져 면접이 너무 길어진다.
+     * 앞에서부터 {@link #TECH_QUESTION_COUNT}개만 고른다. 나머지 면접관은 두 명이 {@link #OTHER_QUESTION_COUNT}
+     * 문항씩 맡아, N:1 면접은 언제나 여섯 문항이 된다 — 면접관 구성은 {@code InterviewService.orderForMulti}가 고정한다.
      */
     private QuestionTailorEntity requestMultiTailor(InterviewEntity interview, UserResponse user,
                                                     SourceQuestions source) {

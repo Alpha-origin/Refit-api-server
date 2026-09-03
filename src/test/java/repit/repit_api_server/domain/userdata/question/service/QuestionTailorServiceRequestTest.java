@@ -37,6 +37,7 @@ import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -101,12 +102,26 @@ class QuestionTailorServiceRequestTest {
     }
 
     private void givenAnalysisResult(Object projectSummary) {
+        givenAnalysisResult(projectSummary, originalQuestions());
+    }
+
+    private void givenAnalysisResult(Object projectSummary, List<Map<String, Object>> interview) {
         when(analysisDataRepository.findLatestCompleted(7L))
                 .thenReturn(Optional.of(AnalysisDataEntity.builder()
                         .jobId("analysis-1")
                         .userId(7L)
-                        .result(Map.of("project_summary", projectSummary, "interview", originalQuestions()))
+                        .result(Map.of("project_summary", projectSummary, "interview", interview))
                         .build()));
+    }
+
+    /** 분석 서버가 원질문을 넉넉히 만들어 보낸 경우. id는 1부터 이어진다. */
+    private List<Map<String, Object>> numberedQuestions(int count) {
+        List<Map<String, Object>> questions = new ArrayList<>();
+        for (int id = 1; id <= count; id++) {
+            questions.add(Map.of("id", id, "category", "tech_choice", "question", id + "번 질문",
+                    "expected_answer", id + "번 기대 답변", "based_on", List.of()));
+        }
+        return questions;
     }
 
     /** /generate 산출물. 와이어 포맷이 snake_case다. */
@@ -189,6 +204,47 @@ class QuestionTailorServiceRequestTest {
         // 성향만 보내면 분석 서버가 질문의 세기를 성향에서 유추하게 된다. 두 축은 독립이다.
         assertThat(sent.getValue().getProfile().getPersonaType()).isEqualTo("REALISTIC");
         assertThat(sent.getValue().getProfile().getPersonaTone()).isEqualTo("PRESSURING");
+    }
+
+    /**
+     * 1:1 면접은 다섯 문항이다.
+     *
+     * <p>분석 서버가 원질문을 몇 개 만들지는 우리가 정하지 않는다. 그대로 흘려보내면 같은 1:1
+     * 면접인데 분석 결과에 따라 길이가 달라진다.
+     */
+    @Test
+    void 일대일은_원질문이_많아도_다섯_문항만_보낸다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(8));
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    /**
+     * 고른 다섯 개가 그대로 sourceQuestions로 남아야 한다.
+     * 재작성이 실패하면 이 값이 그대로 면접에 쓰이므로, 여기에 여덟 개가 남으면 폴백된 면접만 길어진다.
+     */
+    @Test
+    void 일대일은_고른_다섯_문항만_원질문으로_남긴다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(8));
+
+        QuestionTailorEntity saved = service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        assertThat(saved.getSourceQuestions()).hasSize(5);
+    }
+
+    /** 분석 결과가 다섯 개에 못 미치면 있는 만큼 간다. 없는 질문을 만들어낼 수는 없다. */
+    @Test
+    void 일대일은_원질문이_모자라면_있는_만큼_보낸다() {
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).hasSize(3);
     }
 
     @Test
