@@ -247,6 +247,76 @@ class QuestionTailorServiceRequestTest {
         assertThat(sent.getValue().getQuestions()).hasSize(3);
     }
 
+    /**
+     * 원질문이 많다고 면접을 막지 않는다.
+     *
+     * <p>분석 서버가 몇 개를 만들지는 우리가 정하지 않는데, 예전에는 열 개를 넘으면 422로 돌려보냈다.
+     * 어차피 앞에서 다섯 개만 쓰므로 막을 이유가 없다.
+     */
+    @Test
+    void 일대일은_원질문이_열_개를_넘어도_면접을_연다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(12));
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    void N대1도_원질문이_열_개를_넘어도_면접을_연다() {
+        givenMultiPersonas();
+        givenAnalysisResult(projectSummary(), numberedQuestions(12));
+
+        service.requestTailor(interview(InterviewMode.MULTI), user);
+
+        ArgumentCaptor<QuestionTailorMultiRequest> sent =
+                ArgumentCaptor.forClass(QuestionTailorMultiRequest.class);
+        verify(aiServerClient).tailorQuestionsMulti(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorMultiRequest.Question::getId)
+                .containsExactly(1, 2);
+    }
+
+    /**
+     * 쓰지도 않을 뒤쪽 질문 때문에 면접이 막히면 안 된다.
+     *
+     * <p>id 중복은 분석 서버가 요청을 거부하는 사유라 막아야 하지만, 그것은 실제로 넘기는 질문에
+     * 겹침이 있을 때의 이야기다. 버릴 질문까지 훑으면 멀쩡한 면접이 막힌다.
+     */
+    @Test
+    void 버릴_질문의_id가_겹치는_것은_면접을_막지_않는다() {
+        List<Map<String, Object>> questions = new ArrayList<>(numberedQuestions(5));
+        // 여섯 번째부터 id가 겹친다. 다섯 개만 쓰므로 넘어가는 질문에는 겹침이 없다.
+        questions.add(Map.of("id", 1, "category", "tech_choice", "question", "겹치는 질문",
+                "expected_answer", "겹치는 기대 답변", "based_on", List.of()));
+        givenAnalysisResult(projectSummary(), questions);
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    /** 넘길 질문 안에 겹침이 있으면 분석 서버가 요청을 거부한다. 그건 그대로 막는다. */
+    @Test
+    void 넘길_질문의_id가_겹치면_422다() {
+        List<Map<String, Object>> questions = new ArrayList<>(numberedQuestions(3));
+        questions.add(Map.of("id", 1, "category", "tech_choice", "question", "겹치는 질문",
+                "expected_answer", "겹치는 기대 답변", "based_on", List.of()));
+        givenAnalysisResult(projectSummary(), questions);
+
+        assertThatThrownBy(() -> service.requestTailor(interview(InterviewMode.SOLO), user))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+
+        verify(aiServerClient, never()).tailorQuestions(any());
+    }
+
     @Test
     void N대1은_요약을_읽지_못하면_422로_알린다() {
         givenMultiPersonas();
