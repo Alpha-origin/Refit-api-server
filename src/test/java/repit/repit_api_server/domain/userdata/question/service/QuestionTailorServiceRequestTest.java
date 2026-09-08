@@ -37,6 +37,7 @@ import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 import tools.jackson.databind.ObjectMapper;
 
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -101,12 +102,26 @@ class QuestionTailorServiceRequestTest {
     }
 
     private void givenAnalysisResult(Object projectSummary) {
+        givenAnalysisResult(projectSummary, originalQuestions());
+    }
+
+    private void givenAnalysisResult(Object projectSummary, List<Map<String, Object>> interview) {
         when(analysisDataRepository.findLatestCompleted(7L))
                 .thenReturn(Optional.of(AnalysisDataEntity.builder()
                         .jobId("analysis-1")
                         .userId(7L)
-                        .result(Map.of("project_summary", projectSummary, "interview", originalQuestions()))
+                        .result(Map.of("project_summary", projectSummary, "interview", interview))
                         .build()));
+    }
+
+    /** 분석 서버가 원질문을 넉넉히 만들어 보낸 경우. id는 1부터 이어진다. */
+    private List<Map<String, Object>> numberedQuestions(int count) {
+        List<Map<String, Object>> questions = new ArrayList<>();
+        for (int id = 1; id <= count; id++) {
+            questions.add(Map.of("id", id, "category", "tech_choice", "question", id + "번 질문",
+                    "expected_answer", id + "번 기대 답변", "based_on", List.of()));
+        }
+        return questions;
     }
 
     /** /generate 산출물. 와이어 포맷이 snake_case다. */
@@ -189,6 +204,117 @@ class QuestionTailorServiceRequestTest {
         // 성향만 보내면 분석 서버가 질문의 세기를 성향에서 유추하게 된다. 두 축은 독립이다.
         assertThat(sent.getValue().getProfile().getPersonaType()).isEqualTo("REALISTIC");
         assertThat(sent.getValue().getProfile().getPersonaTone()).isEqualTo("PRESSURING");
+    }
+
+    /**
+     * 1:1 면접은 다섯 문항이다.
+     *
+     * <p>분석 서버가 원질문을 몇 개 만들지는 우리가 정하지 않는다. 그대로 흘려보내면 같은 1:1
+     * 면접인데 분석 결과에 따라 길이가 달라진다.
+     */
+    @Test
+    void 일대일은_원질문이_많아도_다섯_문항만_보낸다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(8));
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    /**
+     * 고른 다섯 개가 그대로 sourceQuestions로 남아야 한다.
+     * 재작성이 실패하면 이 값이 그대로 면접에 쓰이므로, 여기에 여덟 개가 남으면 폴백된 면접만 길어진다.
+     */
+    @Test
+    void 일대일은_고른_다섯_문항만_원질문으로_남긴다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(8));
+
+        QuestionTailorEntity saved = service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        assertThat(saved.getSourceQuestions()).hasSize(5);
+    }
+
+    /** 분석 결과가 다섯 개에 못 미치면 있는 만큼 간다. 없는 질문을 만들어낼 수는 없다. */
+    @Test
+    void 일대일은_원질문이_모자라면_있는_만큼_보낸다() {
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).hasSize(3);
+    }
+
+    /**
+     * 원질문이 많다고 면접을 막지 않는다.
+     *
+     * <p>분석 서버가 몇 개를 만들지는 우리가 정하지 않는데, 예전에는 열 개를 넘으면 422로 돌려보냈다.
+     * 어차피 앞에서 다섯 개만 쓰므로 막을 이유가 없다.
+     */
+    @Test
+    void 일대일은_원질문이_열_개를_넘어도_면접을_연다() {
+        givenAnalysisResult(projectSummary(), numberedQuestions(12));
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    @Test
+    void N대1도_원질문이_열_개를_넘어도_면접을_연다() {
+        givenMultiPersonas();
+        givenAnalysisResult(projectSummary(), numberedQuestions(12));
+
+        service.requestTailor(interview(InterviewMode.MULTI), user);
+
+        ArgumentCaptor<QuestionTailorMultiRequest> sent =
+                ArgumentCaptor.forClass(QuestionTailorMultiRequest.class);
+        verify(aiServerClient).tailorQuestionsMulti(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorMultiRequest.Question::getId)
+                .containsExactly(1, 2);
+    }
+
+    /**
+     * 쓰지도 않을 뒤쪽 질문 때문에 면접이 막히면 안 된다.
+     *
+     * <p>id 중복은 분석 서버가 요청을 거부하는 사유라 막아야 하지만, 그것은 실제로 넘기는 질문에
+     * 겹침이 있을 때의 이야기다. 버릴 질문까지 훑으면 멀쩡한 면접이 막힌다.
+     */
+    @Test
+    void 버릴_질문의_id가_겹치는_것은_면접을_막지_않는다() {
+        List<Map<String, Object>> questions = new ArrayList<>(numberedQuestions(5));
+        // 여섯 번째부터 id가 겹친다. 다섯 개만 쓰므로 넘어가는 질문에는 겹침이 없다.
+        questions.add(Map.of("id", 1, "category", "tech_choice", "question", "겹치는 질문",
+                "expected_answer", "겹치는 기대 답변", "based_on", List.of()));
+        givenAnalysisResult(projectSummary(), questions);
+
+        service.requestTailor(interview(InterviewMode.SOLO), user);
+
+        ArgumentCaptor<QuestionTailorRequest> sent = ArgumentCaptor.forClass(QuestionTailorRequest.class);
+        verify(aiServerClient).tailorQuestions(sent.capture());
+        assertThat(sent.getValue().getQuestions()).extracting(QuestionTailorRequest.Question::getId)
+                .containsExactly(1, 2, 3, 4, 5);
+    }
+
+    /** 넘길 질문 안에 겹침이 있으면 분석 서버가 요청을 거부한다. 그건 그대로 막는다. */
+    @Test
+    void 넘길_질문의_id가_겹치면_422다() {
+        List<Map<String, Object>> questions = new ArrayList<>(numberedQuestions(3));
+        questions.add(Map.of("id", 1, "category", "tech_choice", "question", "겹치는 질문",
+                "expected_answer", "겹치는 기대 답변", "based_on", List.of()));
+        givenAnalysisResult(projectSummary(), questions);
+
+        assertThatThrownBy(() -> service.requestTailor(interview(InterviewMode.SOLO), user))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getStatus())
+                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+
+        verify(aiServerClient, never()).tailorQuestions(any());
     }
 
     @Test

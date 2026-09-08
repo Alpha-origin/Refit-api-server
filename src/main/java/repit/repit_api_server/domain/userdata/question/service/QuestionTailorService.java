@@ -69,10 +69,17 @@ public class QuestionTailorService {
 
     private static final String CALLBACK_PATH = "/api/questions/tailor/callback";
     private static final String MULTI_CALLBACK_PATH = "/api/questions/tailor/multi/callback";
-    private static final int MAX_QUESTIONS = 10;
     private static final String STATUS_SUCCEEDED = "succeeded";
 
-    // 기술 면접관이 맡을 문항 수. 원질문 5개를 다 쓰면 다른 면접관 몫까지 더해져 면접이 너무 길어진다.
+    /**
+     * 1:1 면접의 문항 수.
+     *
+     * <p>분석 서버는 원질문을 몇 개 만들지 우리에게 맞춰주지 않는다. 그대로 흘려보내면 면접 길이가
+     * 분석 결과에 따라 들쭉날쭉해지므로, 넘기기 전에 앞에서부터 이만큼만 고른다.
+     */
+    private static final int SOLO_QUESTION_COUNT = 5;
+
+    // 기술 면접관이 맡을 문항 수. 원질문을 다 쓰면 다른 면접관 몫까지 더해져 면접이 너무 길어진다.
     private static final int TECH_QUESTION_COUNT = 2;
     // 기술 외 면접관 한 명이 맡을 문항 수. 분석 서버 기본값과 같다.
     private static final int OTHER_QUESTION_COUNT = 2;
@@ -157,11 +164,14 @@ public class QuestionTailorService {
 
     /** 분석 서버에 질문 준비를 새로 접수한다. 1:1과 N:1의 갈림길이 여기다. */
     private QuestionTailorEntity startTailor(InterviewEntity interview, UserResponse user) {
-        SourceQuestions source = loadOriginalQuestions(interview.getUserId());
+        SourceQuestions source = loadOriginalQuestions(interview.getUserId(),
+                sourceQuestionCount(interview.getMode()));
         if (interview.getMode() == InterviewMode.MULTI) {
             return requestMultiTailor(interview, user, source);
         }
 
+        // 읽어오는 자리에서 이미 쓸 만큼만 골라져 있다. 이것이 그대로 sourceQuestions로 남아,
+        // 재작성이 실패해 원질문으로 되돌아가도 문항 수는 같다.
         List<TailoredQuestionResponse> sourceQuestions = source.questions();
         QuestionTailorRequest.Profile profile = resolveProfile(user, interview.getPersonaId());
 
@@ -192,8 +202,10 @@ public class QuestionTailorService {
      * <p>1:1과 달리 두 가지가 한 번에 돈다 — 기술 면접관이 쓸 원질문을 다시 쓰고, 나머지 면접관
      * 몫의 질문을 새로 만든다. 신규 질문의 근거는 프로젝트 요약뿐이라 그것까지 실어 보낸다.
      *
-     * <p>원질문을 전부 넘기지는 않는다. 5개를 다 쓰면 다른 면접관 몫이 더해져 면접이 너무 길어진다.
-     * 앞에서부터 {@link #TECH_QUESTION_COUNT}개만 고른다.
+     * <p>원질문을 전부 넘기지는 않는다. 다 쓰면 다른 면접관 몫이 더해져 면접이 너무 길어진다.
+     * 기술 면접관 몫인 {@link #TECH_QUESTION_COUNT}개는 {@link #loadOriginalQuestions}가 이미 골라 넘겨준다.
+     * 나머지 면접관은 두 명이 {@link #OTHER_QUESTION_COUNT} 문항씩 맡아, N:1 면접은 언제나 여섯 문항이 된다 —
+     * 면접관 구성은 {@code InterviewService.orderForMulti}가 고정한다.
      */
     private QuestionTailorEntity requestMultiTailor(InterviewEntity interview, UserResponse user,
                                                     SourceQuestions source) {
@@ -201,9 +213,7 @@ public class QuestionTailorService {
         PersonaEntity tech = members.getFirst();
         List<PersonaEntity> others = members.subList(1, members.size());
 
-        List<TailoredQuestionResponse> techQuestions = source.questions().stream()
-                .limit(TECH_QUESTION_COUNT)
-                .toList();
+        List<TailoredQuestionResponse> techQuestions = source.questions();
         verifyTechQuestions(techQuestions);
 
         QuestionTailorAcceptedResponse accepted =
@@ -395,8 +405,24 @@ public class QuestionTailorService {
 
     }
 
-    /** 재작성 대상은 해당 사용자의 가장 최근 분석 결과에 담긴 원질문이다. */
-    private SourceQuestions loadOriginalQuestions(Long userId) {
+    /** 면접 방식별로 원질문에서 골라 쓸 문항 수. 1:1은 이것이 곧 면접 문항 수고, N:1은 기술 면접관 몫이다. */
+    private int sourceQuestionCount(InterviewMode mode) {
+        return mode == InterviewMode.MULTI ? TECH_QUESTION_COUNT : SOLO_QUESTION_COUNT;
+    }
+
+    /**
+     * 재작성 대상은 해당 사용자의 가장 최근 분석 결과에 담긴 원질문이다.
+     *
+     * <p>분석 서버가 원질문을 몇 개 만들지는 우리가 정하지 않는다. 넉넉히 만들어 보내도 면접에 쓰는 수는
+     * 정해져 있으므로, 많다고 막지 않고 앞에서부터 {@code limit}개만 골라 쓴다.
+     *
+     * <p>검증은 고른 것에만 건다. 버릴 질문까지 훑으면, 쓰지도 않을 뒤쪽 질문의 id가 겹쳤다는 이유로
+     * 멀쩡한 면접이 막힌다. 고른 질문의 id가 비었거나 겹치는 것은 그대로 막는다 — 분석 서버가
+     * 그 요청을 422로 거부하므로 넘길 방법이 없다.
+     *
+     * @param limit 면접에 실제로 쓸 문항 수. 분석 결과가 이보다 적으면 있는 만큼만 돌려준다.
+     */
+    private SourceQuestions loadOriginalQuestions(Long userId, int limit) {
         AnalysisDataEntity analysisData = analysisDataRepository
                 .findLatestCompleted(userId)
                 .orElseThrow(() -> BusinessException.notFound(
@@ -407,17 +433,14 @@ public class QuestionTailorService {
                 ? List.of()
                 : parsed.getInterview();
 
-        // 아래 조건은 분석 서버가 422로 즉시 거부하는 항목이라 요청 전에 걸러낸다.
+        // 질문이 하나도 없으면 분석 서버가 422로 즉시 거부한다. 요청 전에 걸러낸다.
         if (interview.isEmpty()) {
             throw BusinessException.unprocessable("다시 쓸 질문이 없습니다.");
-        }
-        if (interview.size() > MAX_QUESTIONS) {
-            throw BusinessException.unprocessable("질문은 최대 " + MAX_QUESTIONS + "개까지 다시 쓸 수 있습니다.");
         }
 
         Set<Integer> seen = new HashSet<>();
         List<TailoredQuestionResponse> questions = new ArrayList<>();
-        for (GeneratedQuestionResponse question : interview) {
+        for (GeneratedQuestionResponse question : interview.subList(0, Math.min(limit, interview.size()))) {
             if (question.getId() == null || !seen.add(question.getId())) {
                 throw BusinessException.unprocessable("질문 id가 중복되어 다시 쓸 수 없습니다.");
             }
@@ -918,8 +941,10 @@ public class QuestionTailorService {
                 .findTopByInterviewIdOrderByCreatedAtDesc(interviewId)
                 .orElse(null);
         if (tailor == null) {
+            // 미리보기도 면접에 실제로 쓸 만큼만 보여준다. 여기서 더 보여주면 시작 전과 후의 문항 수가 어긋난다.
             return QuestionTailorResponse.notRequested(interviewId,
-                    loadOriginalQuestions(interview.getUserId()).questions());
+                    loadOriginalQuestions(interview.getUserId(),
+                            sourceQuestionCount(interview.getMode())).questions());
         }
 
         // 폴링하는 클라이언트가 PENDING에 갇히지 않도록 조회 시점에도 판정하고, 밀린 뒷단을 마저 밟는다.
