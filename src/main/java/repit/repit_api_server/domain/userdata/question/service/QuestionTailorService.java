@@ -37,7 +37,6 @@ import repit.repit_api_server.domain.userdata.question.preparation.PreparationSt
 import repit.repit_api_server.domain.userdata.question.preparation.PreparationStatus;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionTailorRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 import tools.jackson.core.JacksonException;
@@ -90,7 +89,6 @@ public class QuestionTailorService {
     private final PersonaRepository personaRepository;
     private final AnalysisDataRepository analysisDataRepository;
     private final AiServerClient aiServerClient;
-    private final AuthServerClient authServerClient;
     private final ChatInterviewHandoffService chatInterviewHandoffService;
     private final SseNotifier sseNotifier;
     private final ObjectMapper objectMapper;
@@ -933,12 +931,10 @@ public class QuestionTailorService {
      * 면접 시작 뒤 클라이언트가 준비 상태를 확인하는 조회.
      * 재작성이 실패했어도 원질문을 돌려주므로 응답만 보고 면접을 열 수 있다.
      */
-    public QuestionTailorResponse getTailorResult(String authorization, Long interviewId) {
-        UserResponse user = currentUser(authorization);
-
+    public QuestionTailorResponse getTailorResult(Long userId, Long interviewId) {
         InterviewEntity interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("면접을 찾을 수 없습니다"));
-        verifyOwner(interview.getUserId(), user.getId());
+        verifyOwner(interview.getUserId(), userId);
 
         QuestionTailorEntity tailor = questionTailorRepository
                 .findTopByInterviewIdOrderByCreatedAtDesc(interviewId)
@@ -955,14 +951,6 @@ public class QuestionTailorService {
         completePreparation(tailor);
 
         return QuestionTailorResponse.of(tailor);
-    }
-
-    private UserResponse currentUser(String authorization) {
-        UserResponse user = authServerClient.getUser(authorization);
-        if (user == null || user.getId() == null) {
-            throw BusinessException.unauthorized("사용자 정보를 확인할 수 없습니다. 다시 로그인해주세요.");
-        }
-        return user;
     }
 
     // 면접 질문은 본인만 볼 수 있어야 한다.

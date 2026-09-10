@@ -22,7 +22,6 @@ import repit.repit_api_server.domain.userdata.question.entity.QuestionEntity;
 import repit.repit_api_server.domain.userdata.question.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.client.ChatServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 
@@ -54,8 +53,6 @@ class InterviewServiceSaveResultTest {
     @Mock
     private ChatServerClient chatServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private AnswerRepository answerRepository;
     @Mock
     private PersonaRepository personaRepository;
@@ -72,7 +69,7 @@ class InterviewServiceSaveResultTest {
     @BeforeEach
     void setUp() {
         service = new InterviewService(interviewRepository, questionRepository, chatServerClient,
-                authServerClient, answerRepository, personaRepository, questionTailorService,
+                answerRepository, personaRepository, questionTailorService,
                 interviewPersonaRepository);
 
         when(interviewRepository.findById(3L)).thenReturn(Optional.of(InterviewEntity.builder()

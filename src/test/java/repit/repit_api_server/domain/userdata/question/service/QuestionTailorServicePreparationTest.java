@@ -35,7 +35,6 @@ import repit.repit_api_server.domain.userdata.question.entity.enums.TailorStatus
 import repit.repit_api_server.domain.userdata.question.preparation.FailureStage;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionTailorRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 import tools.jackson.databind.ObjectMapper;
@@ -78,8 +77,6 @@ class QuestionTailorServicePreparationTest {
     @Mock
     private AiServerClient aiServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private ChatInterviewHandoffService chatInterviewHandoffService;
     @Mock
     private SseNotifier sseNotifier;
@@ -91,7 +88,7 @@ class QuestionTailorServicePreparationTest {
     void setUp() {
         service = new QuestionTailorService(questionTailorRepository, interviewRepository,
                 interviewPersonaRepository, personaRepository,
-                analysisDataRepository, aiServerClient, authServerClient, chatInterviewHandoffService, sseNotifier,
+                analysisDataRepository, aiServerClient, chatInterviewHandoffService, sseNotifier,
                 new ObjectMapper());
         ReflectionTestUtils.setField(service, "pendingTimeout", Duration.ofMinutes(2));
         ReflectionTestUtils.setField(service, "callbackBaseUrl", "https://api.test");

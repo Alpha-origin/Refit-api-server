@@ -8,7 +8,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.mockito.junit.jupiter.MockitoSettings;
 import org.mockito.quality.Strictness;
 import org.springframework.http.HttpStatus;
-import org.springframework.test.util.ReflectionTestUtils;
 import repit.repit_api_server.domain.userdata.answer.repository.AnswerRepository;
 import repit.repit_api_server.domain.userdata.interview.entity.InterviewEntity;
 import repit.repit_api_server.domain.userdata.interview.entity.enums.InterviewMode;
@@ -18,10 +17,8 @@ import repit.repit_api_server.domain.userdata.interview.repository.InterviewRepo
 import repit.repit_api_server.domain.userdata.persona.repository.PersonaRepository;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.client.ChatServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
-import repit.repit_api_server.global.response.UserResponse;
 
 import java.util.Optional;
 
@@ -46,8 +43,6 @@ class InterviewServiceLookupTest {
     @Mock
     private ChatServerClient chatServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private AnswerRepository answerRepository;
     @Mock
     private PersonaRepository personaRepository;
@@ -58,24 +53,22 @@ class InterviewServiceLookupTest {
 
     private InterviewService service;
 
-    private static final String TOKEN = "Bearer token";
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
 
     @BeforeEach
     void setUp() {
         service = new InterviewService(interviewRepository, questionRepository, chatServerClient,
-                authServerClient, answerRepository, personaRepository, questionTailorService,
+                answerRepository, personaRepository, questionTailorService,
                 interviewPersonaRepository);
 
-        UserResponse user = new UserResponse();
-        ReflectionTestUtils.setField(user, "id", 7L);
-        when(authServerClient.getUser(TOKEN)).thenReturn(user);
     }
 
     @Test
     void 없는_면접을_조회하면_404다() {
         when(interviewRepository.findById(3L)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getInterviewById(TOKEN, 3L))
+        assertThatThrownBy(() -> service.getInterviewById(USER_ID, 3L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("면접을 찾을 수 없습니다")
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -93,7 +86,7 @@ class InterviewServiceLookupTest {
                 .status(Status.COMPLETED)
                 .build()));
 
-        assertThat(service.getInterviewById(TOKEN, 3L).getInterviewId()).isEqualTo(3L);
+        assertThat(service.getInterviewById(USER_ID, 3L).getInterviewId()).isEqualTo(3L);
     }
 
     @Test
@@ -107,7 +100,7 @@ class InterviewServiceLookupTest {
                 .status(Status.COMPLETED)
                 .build()));
 
-        assertThatThrownBy(() -> service.getInterviewById(TOKEN, 3L))
+        assertThatThrownBy(() -> service.getInterviewById(USER_ID, 3L))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
                 .isEqualTo(HttpStatus.FORBIDDEN);

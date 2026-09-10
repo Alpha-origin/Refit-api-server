@@ -27,10 +27,8 @@ import repit.repit_api_server.domain.userdata.persona.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.persona.repository.PersonaRepository;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.client.ChatServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
-import repit.repit_api_server.global.response.UserResponse;
 
 import java.util.List;
 
@@ -55,8 +53,6 @@ class InterviewServiceMultiCreateTest {
     @Mock
     private ChatServerClient chatServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private AnswerRepository answerRepository;
     @Mock
     private PersonaRepository personaRepository;
@@ -68,17 +64,17 @@ class InterviewServiceMultiCreateTest {
     @Captor
     private ArgumentCaptor<List<InterviewPersonaEntity>> savedMembers;
 
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
+
     private InterviewService service;
 
     @BeforeEach
     void setUp() {
         service = new InterviewService(interviewRepository, questionRepository, chatServerClient,
-                authServerClient, answerRepository, personaRepository, questionTailorService,
+                answerRepository, personaRepository, questionTailorService,
                 interviewPersonaRepository);
 
-        UserResponse user = mock(UserResponse.class);
-        when(user.getId()).thenReturn(7L);
-        when(authServerClient.getUser("Bearer t")).thenReturn(user);
 
         when(interviewRepository.save(any(InterviewEntity.class))).thenAnswer(invocation -> {
             InterviewEntity interview = invocation.getArgument(0);
@@ -106,7 +102,7 @@ class InterviewServiceMultiCreateTest {
         when(personaRepository.findAllById(List.of(13L, 11L, 12L))).thenReturn(List.of(
                 persona(13L, Role.CEO), persona(11L, Role.TECH), persona(12L, Role.HR)));
 
-        InterviewResponse response = service.createInterview("Bearer t",
+        InterviewResponse response = service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(13L, 11L, 12L)));
 
         assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
@@ -129,7 +125,7 @@ class InterviewServiceMultiCreateTest {
         when(personaRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(12L, Role.HR)));
 
-        InterviewResponse response = service.createInterview("Bearer t",
+        InterviewResponse response = service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L, 12L)));
 
         assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
@@ -143,7 +139,7 @@ class InterviewServiceMultiCreateTest {
                 persona(12L, Role.HR), persona(13L, Role.CEO), persona(15L, Role.PM),
                 persona(16L, Role.DESIGN), persona(11L, Role.TECH)));
 
-        InterviewResponse response = service.createInterview("Bearer t",
+        InterviewResponse response = service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(12L, 13L, 15L, 16L, 11L)));
 
         assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
@@ -169,7 +165,7 @@ class InterviewServiceMultiCreateTest {
                 persona(11L, Role.TECH), persona(12L, Role.HR), persona(13L, Role.CEO),
                 persona(15L, Role.PM), persona(16L, Role.DESIGN), persona(17L, Role.HR)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L, 12L, 13L, 15L, 16L, 17L))))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("1명 이상 4명 이하")
@@ -185,7 +181,7 @@ class InterviewServiceMultiCreateTest {
         when(personaRepository.findAllById(List.of(12L, 13L))).thenReturn(List.of(
                 persona(12L, Role.HR), persona(13L, Role.CEO)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(12L, 13L))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -198,7 +194,7 @@ class InterviewServiceMultiCreateTest {
     void 기술_면접관만_있으면_422다() {
         when(personaRepository.findAllById(List.of(11L))).thenReturn(List.of(persona(11L, Role.TECH)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -210,7 +206,7 @@ class InterviewServiceMultiCreateTest {
         when(personaRepository.findAllById(List.of(11L, 14L, 12L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(14L, Role.TECH), persona(12L, Role.HR)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L, 14L, 12L))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -219,7 +215,7 @@ class InterviewServiceMultiCreateTest {
 
     @Test
     void 같은_면접관을_두_번_지정하면_422다() {
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L, 11L, 12L))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -233,7 +229,7 @@ class InterviewServiceMultiCreateTest {
         when(personaRepository.findAllById(List.of(11L, 12L, 99L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(12L, Role.HR)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, null, List.of(11L, 12L, 99L))))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())

@@ -24,7 +24,6 @@ import repit.repit_api_server.domain.metadata.sse.SseNotifier;
 import repit.repit_api_server.domain.userdata.interview.dto.response.InterviewReadyResponse;
 import repit.repit_api_server.domain.userdata.question.preparation.FailureStage;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import tools.jackson.databind.ObjectMapper;
 
 import java.util.List;
@@ -62,8 +61,6 @@ class QuestionTailorServiceMultiCallbackTest {
     @Mock
     private AiServerClient aiServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private ChatInterviewHandoffService chatInterviewHandoffService;
 
     @Captor
@@ -78,7 +75,7 @@ class QuestionTailorServiceMultiCallbackTest {
     void setUp() {
         service = new QuestionTailorService(questionTailorRepository, interviewRepository,
                 interviewPersonaRepository, personaRepository,
-                analysisDataRepository, aiServerClient, authServerClient, chatInterviewHandoffService, sseNotifier,
+                analysisDataRepository, aiServerClient, chatInterviewHandoffService, sseNotifier,
                 new ObjectMapper());
 
         when(questionTailorRepository.claimChatDelivery(anyLong())).thenReturn(1);
