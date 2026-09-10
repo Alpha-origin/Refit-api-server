@@ -15,6 +15,28 @@ import java.util.Optional;
 
 public interface AnalysisDataRepository extends JpaRepository<AnalysisDataEntity, String> {
 
+    /**
+     * 소유자 확인에만 쓰는 값.
+     *
+     * <p>jobId까지 같이 고르는 것은 행이 없는 것과 소유자가 비어 있는 것을 가리기 위해서다.
+     * userId 하나만 고르면 둘 다 빈 결과로 돌아와, 모르는 작업을 소유자 없는 작업으로 잘못 본다.
+     */
+    interface AnalysisOwner {
+        String getJobId();
+
+        Long getUserId();
+    }
+
+    /**
+     * 소유자만 읽는다. 엔티티를 불러오면 result jsonb까지 따라온다.
+     *
+     * <p>그 값은 이 테이블에서 가장 무겁다 — 포트폴리오 요약과 면접 질문 전체가 들어 있어,
+     * Postgres가 TOAST에서 꺼내 오고 Hibernate가 Map으로 풀어낸다. 소유자를 견주는 데는
+     * Long 하나면 되는데 구독과 결과 조회가 매번 그 비용을 냈다.
+     */
+    @Query("select a.jobId as jobId, a.userId as userId from AnalysisDataEntity a where a.jobId = :jobId")
+    Optional<AnalysisOwner> findOwner(@Param("jobId") String jobId);
+
     /** 분석이 끝난(result가 채워진) 가장 최근 작업. */
     default Optional<AnalysisDataEntity> findLatestCompleted(Long userId) {
         return findLatestCompleted(userId, PageRequest.of(0, 1)).stream().findFirst();

@@ -150,17 +150,25 @@ public class AiMetaDataService {
      *
      * <p>소유자가 비어 있는 행은 접수 응답을 받지 못해 사용자를 붙이지 못한 분석이다.
      * 누구 것인지 모르는 자료라 아무에게도 내주지 않는다.
+     *
+     * <p>여기서는 소유자만 읽는다. 구독은 결과를 쓰지 않는데, 엔티티를 불러오면 result jsonb가
+     * 딸려 와 읽지도 않을 값을 풀어내는 데 시간을 쓴다.
      */
     @Transactional(readOnly = true)
     public void verifyOwner(String jobId, Long userId) {
-        AnalysisDataEntity data = analysisDataRepository.findById(jobId)
+        AnalysisDataRepository.AnalysisOwner owner = analysisDataRepository.findOwner(jobId)
                 .orElseThrow(() -> BusinessException.notFound("분석 결과를 찾을 수 없습니다. jobId=" + jobId));
 
-        if (data.getUserId() == null) {
+        verifyOwner(jobId, owner.getUserId(), userId);
+    }
+
+    /** 소유자를 견주는 기준. 어디서 읽어 왔든 같은 판정을 거치게 한다. */
+    private void verifyOwner(String jobId, Long ownerId, Long requesterId) {
+        if (ownerId == null) {
             log.warn("소유자가 붙지 않은 분석을 조회하려 했습니다. jobId={}", jobId);
             throw BusinessException.forbidden("본인의 분석 결과만 볼 수 있습니다.");
         }
-        if (!data.getUserId().equals(userId)) {
+        if (!ownerId.equals(requesterId)) {
             throw BusinessException.forbidden("본인의 분석 결과만 볼 수 있습니다.");
         }
     }
