@@ -30,7 +30,6 @@ import repit.repit_api_server.domain.userdata.question.entity.enums.TailorStatus
 import repit.repit_api_server.domain.userdata.question.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.client.ChatServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
@@ -74,23 +73,20 @@ public class InterviewService {
     private final InterviewRepository interviewRepository;
     private final QuestionRepository questionRepository;
     private final ChatServerClient chatServerClient;
-    private final AuthServerClient authServerClient;
     private final AnswerRepository answerRepository;
     private final PersonaRepository personaRepository;
     private final QuestionTailorService questionTailorService;
     private final InterviewPersonaRepository interviewPersonaRepository;
 
-    public InterviewResponse createInterview(String authorization, CreateInterviewRequest request) {
-        UserResponse user = currentUser(authorization);
-
+    public InterviewResponse createInterview(Long userId, CreateInterviewRequest request) {
         if (request.getPersonaIds() != null && !request.getPersonaIds().isEmpty()) {
-            return createMultiInterview(user, request.getPersonaIds());
+            return createMultiInterview(userId, request.getPersonaIds());
         }
 
         PersonaEntity persona = findPersona(request);
 
         InterviewEntity interview = InterviewEntity.builder()
-                .userId(user.getId())
+                .userId(userId)
                 .mode(InterviewMode.SOLO)
                 .personaId(persona.getPersonaId())
                 .status(Status.IN_PROGRESS)
@@ -108,7 +104,7 @@ public class InterviewService {
      * 이 순서를 따르고, 꼬리질문이 부모 질문 바로 뒤에 삽입되므로 한 면접관의 질문 묶음이 끝나야
      * 다음 면접관으로 넘어간다.
      */
-    private InterviewResponse createMultiInterview(UserResponse user, List<Long> requestedIds) {
+    private InterviewResponse createMultiInterview(Long userId, List<Long> requestedIds) {
         List<Long> personaIds = new ArrayList<>(new LinkedHashSet<>(requestedIds));
         if (personaIds.size() != requestedIds.size()) {
             throw BusinessException.unprocessable("같은 면접관을 두 번 지정할 수 없습니다.");
@@ -125,7 +121,7 @@ public class InterviewService {
         List<PersonaEntity> ordered = orderForMulti(personaIds.stream().map(personas::get).toList());
 
         InterviewEntity saved = interviewRepository.save(InterviewEntity.builder()
-                .userId(user.getId())
+                .userId(userId)
                 .mode(InterviewMode.MULTI)
                 .status(Status.IN_PROGRESS)
                 .sessionId(UUID.randomUUID().toString())
@@ -203,14 +199,6 @@ public class InterviewService {
                         "페르소나를 찾을 수 없습니다: " + request.getPersonaName()));
     }
 
-    private UserResponse currentUser(String authorization) {
-        UserResponse user = authServerClient.getUser(authorization);
-        if (user == null || user.getId() == null) {
-            throw BusinessException.unauthorized("사용자 정보를 확인할 수 없습니다. 다시 로그인해주세요.");
-        }
-        return user;
-    }
-
     /**
      * 면접 시작. 웹이 부르는 진입점이다.
      *
@@ -218,9 +206,7 @@ public class InterviewService {
      * 재작성은 비동기라 여기서는 접수만 하고, 콜백이 도착해 질문이 확정되면 그때
      * 채팅 서버로 면접 데이터가 넘어간다. 준비 상태는 GET /api/questions/tailor 로 확인한다.
      */
-    public InterviewPrepareResponse prepareInterview(String authorization, Long interviewId) {
-        UserResponse user = currentUser(authorization);
-
+    public InterviewPrepareResponse prepareInterview(UserResponse user, Long interviewId) {
         InterviewEntity interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("면접을 찾을 수 없습니다"));
         if (!user.getId().equals(interview.getUserId())) {
@@ -237,9 +223,7 @@ public class InterviewService {
      * <p>실패한 건을 그대로 두면 면접 시작을 다시 눌러도 그 실패가 그대로 돌아온다. 특히 N:1은
      * 폴백할 원질문이 없어 한 번 실패하면 면접을 새로 만드는 것 말고는 길이 없었다.
      */
-    public InterviewPrepareResponse retryPreparation(String authorization, Long interviewId) {
-        UserResponse user = currentUser(authorization);
-
+    public InterviewPrepareResponse retryPreparation(UserResponse user, Long interviewId) {
         InterviewEntity interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("면접을 찾을 수 없습니다"));
         if (!user.getId().equals(interview.getUserId())) {
@@ -250,18 +234,16 @@ public class InterviewService {
         return InterviewPrepareResponse.of(tailor, interview.getSessionId());
     }
 
-    public List<InterviewResponse> getAllInterviewsByUserId(String authorization) {
-        UserResponse user = authServerClient.getUser(authorization);
-
-        return interviewRepository.findAllByUserId(user.getId()).stream()
+    public List<InterviewResponse> getAllInterviewsByUserId(Long userId) {
+        return interviewRepository.findAllByUserId(userId).stream()
                 .map(interview -> InterviewResponse.from(interview, personaIdsOf(interview)))
                 .toList();
     }
 
-    public InterviewResponse getInterviewById(String authorization, Long interviewId) {
+    public InterviewResponse getInterviewById(Long userId, Long interviewId) {
         InterviewEntity interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("면접을 찾을 수 없습니다"));
-        verifyOwner(interview, currentUser(authorization));
+        verifyOwner(interview, userId);
         return InterviewResponse.from(interview, personaIdsOf(interview));
     }
 
@@ -271,8 +253,8 @@ public class InterviewService {
      * <p>면접 id는 순번이라 옆 번호를 넣어보는 것만으로 남의 면접에 닿는다. 그 안에는 면접
      * 전문과 답변이 들어 있어, 소유자를 견주지 않으면 조회 한 번으로 그대로 새어나간다.
      */
-    private void verifyOwner(InterviewEntity interview, UserResponse user) {
-        if (!user.getId().equals(interview.getUserId())) {
+    private void verifyOwner(InterviewEntity interview, Long userId) {
+        if (!userId.equals(interview.getUserId())) {
             throw BusinessException.forbidden("본인의 면접만 볼 수 있습니다.");
         }
     }
@@ -298,10 +280,10 @@ public class InterviewService {
      * <p>진행 중인 면접은 아직 우리 DB에 아무것도 없다. 채팅 면접 질문은 결과가 넘어올 때
      * 한꺼번에 들어오기 때문이다. 그 사이에는 채팅 서버 세션이 현재 상태를 들고 있다.
      */
-    public ChatInterviewAllResponse getChatInterview(String authorization, Long interviewId) {
+    public ChatInterviewAllResponse getChatInterview(Long userId, Long interviewId) {
         InterviewEntity interview = interviewRepository.findById(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("면접을 찾을 수 없습니다"));
-        verifyOwner(interview, currentUser(authorization));
+        verifyOwner(interview, userId);
 
         List<QuestionEntity> questions =
                 questionRepository.findAllByInterviewIdOrderByQuestionIdAsc(interviewId);

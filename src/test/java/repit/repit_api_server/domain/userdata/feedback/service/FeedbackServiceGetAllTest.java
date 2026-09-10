@@ -30,7 +30,6 @@ import repit.repit_api_server.domain.userdata.persona.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.persona.repository.PersonaRepository;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 
@@ -75,8 +74,9 @@ class FeedbackServiceGetAllTest {
     private AnswerRepository answerRepository;
     @Mock
     private AiServerClient aiServerClient;
-    @Mock
-    private AuthServerClient authServerClient;
+
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
 
     private FeedbackService service;
 
@@ -84,11 +84,10 @@ class FeedbackServiceGetAllTest {
     void setUp() {
         service = new FeedbackService(feedbackRepository, feedbackItemRepository, feedbackPersonaRepository,
                 interviewRepository, interviewPersonaRepository, personaRepository, questionRepository,
-                answerRepository, aiServerClient, authServerClient);
+                answerRepository, aiServerClient);
         ReflectionTestUtils.setField(service, "callbackBaseUrl", "https://api.repit.test");
         ReflectionTestUtils.setField(service, "pendingTimeout", Duration.ofMinutes(5));
 
-        when(authServerClient.getUser(anyString())).thenReturn(user(7L));
     }
 
     @Test
@@ -100,7 +99,7 @@ class FeedbackServiceGetAllTest {
         when(feedbackItemRepository.findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(List.of(10L, 11L)))
                 .thenReturn(List.of());
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses).extracting(FeedbackResponse::getFeedbackId).containsExactly(10L, 11L);
         assertThat(responses).extracting(FeedbackResponse::getInterviewId).containsExactly(100L, 101L);
@@ -115,7 +114,7 @@ class FeedbackServiceGetAllTest {
         when(feedbackItemRepository.findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(List.of(10L, 11L)))
                 .thenReturn(List.of(item(10L, "q-1"), item(10L, "q-2"), item(11L, "q-3")));
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses.get(0).getPersonas()).extracting("personaRole").containsExactly("백엔드 리드");
         assertThat(responses.get(0).getFeedbacks()).extracting("questionId").containsExactly("q-1", "q-2");
@@ -135,7 +134,7 @@ class FeedbackServiceGetAllTest {
         when(feedbackItemRepository.findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(List.of(12L, 11L)))
                 .thenReturn(List.of());
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses).extracting(FeedbackResponse::getFeedbackId).containsExactly(12L, 11L);
         assertThat(responses).extracting(FeedbackResponse::getInterviewId).containsExactly(100L, 101L);
@@ -153,7 +152,7 @@ class FeedbackServiceGetAllTest {
         when(interviewRepository.findAllById(List.of(100L, 101L)))
                 .thenReturn(List.of(interview(100L, InterviewMode.MULTI), interview(101L, InterviewMode.SOLO)));
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses).extracting(FeedbackResponse::getMode)
                 .containsExactly(InterviewMode.MULTI, InterviewMode.SOLO);
@@ -170,7 +169,7 @@ class FeedbackServiceGetAllTest {
                 .thenReturn(List.of());
         when(interviewRepository.findAllById(List.of(100L))).thenReturn(List.of());
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses.get(0).getMode()).isNull();
         assertThat(responses.get(0).getFeedbackId()).isEqualTo(10L);
@@ -180,7 +179,7 @@ class FeedbackServiceGetAllTest {
     void 피드백이_없으면_더_조회하지_않고_빈_목록을_준다() {
         when(feedbackRepository.findAllByUserIdOrderByCreatedAtDesc(7L)).thenReturn(List.of());
 
-        assertThat(service.getAllFeedbacks("Bearer token")).isEmpty();
+        assertThat(service.getAllFeedbacks(USER_ID)).isEmpty();
 
         verify(feedbackPersonaRepository, never()).findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(any());
         verify(feedbackItemRepository, never()).findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(any());
@@ -198,20 +197,10 @@ class FeedbackServiceGetAllTest {
         when(feedbackItemRepository.findAllByFeedbackIdInOrderByFeedbackIdAscSortOrderAsc(List.of(10L)))
                 .thenReturn(List.of());
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses.get(0).getStatus()).isEqualTo(FeedbackStatus.FAILED);
         verify(feedbackRepository).save(stale);
-    }
-
-    @Test
-    void 사용자를_확인하지_못하면_조회하지_않는다() {
-        when(authServerClient.getUser(anyString())).thenReturn(null);
-
-        assertThatThrownBy(() -> service.getAllFeedbacks("Bearer token"))
-                .isInstanceOf(BusinessException.class);
-
-        verify(feedbackRepository, never()).findAllByUserIdOrderByCreatedAtDesc(any());
     }
 
     @Test
@@ -232,7 +221,7 @@ class FeedbackServiceGetAllTest {
                 .thenReturn(List.of(persona(1L, Type.METICULOUS, Level.HARD),
                         persona(2L, Type.FRIENDLY, Level.EASY)));
 
-        List<FeedbackResponse> responses = service.getAllFeedbacks("Bearer token");
+        List<FeedbackResponse> responses = service.getAllFeedbacks(USER_ID);
 
         assertThat(responses).extracting(FeedbackResponse::getStyle)
                 .containsExactly(Type.METICULOUS, Type.FRIENDLY);

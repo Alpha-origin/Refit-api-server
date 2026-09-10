@@ -20,7 +20,7 @@ import repit.repit_api_server.domain.metadata.sse.SseNotifier;
 import repit.repit_api_server.domain.metadata.sse.SseSubscription;
 import repit.repit_api_server.domain.userdata.interview.dto.response.InterviewReadyResponse;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.auth.CurrentUser;
+import repit.repit_api_server.global.auth.AuthUser;
 import repit.repit_api_server.global.client.AiServerClient;
 import repit.repit_api_server.global.response.UserResponse;
 
@@ -31,7 +31,6 @@ import java.util.Map;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doThrow;
-import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.spy;
 import static org.mockito.Mockito.times;
@@ -57,8 +56,6 @@ class AiMetaDataControllerSseTest {
     private AiServerClient aiServerClient;
     @Mock
     private AnalysisLaunchService analysisLaunchService;
-    @Mock
-    private CurrentUser currentUser;
 
     private SseEmitterRepository sseEmitterRepository;
     private AiMetaDataController controller;
@@ -68,22 +65,27 @@ class AiMetaDataControllerSseTest {
         sseEmitterRepository = new SseEmitterRepository();
         controller = new AiMetaDataController(
                 metaService, aiMetaDataService, sseEmitterRepository,
-                new SseNotifier(sseEmitterRepository), questionTailorService, currentUser,
+                new SseNotifier(sseEmitterRepository), questionTailorService,
                 aiServerClient, analysisLaunchService);
-
-        // 구독은 소유자만 열 수 있다. 이 테스트가 보는 것은 그 뒤의 이벤트 흐름이라 통과시킨다.
-        UserResponse user = new UserResponse();
-        ReflectionTestUtils.setField(user, "id", 7L);
-        lenient().when(currentUser.require(TOKEN)).thenReturn(user);
     }
 
-    private static final String TOKEN = "Bearer token";
+    /**
+     * 구독은 소유자만 열 수 있다. 그 확인은 시큐리티 필터와 서비스가 하고, 이 테스트가 보는
+     * 것은 그 뒤의 이벤트 흐름이라 인증을 마친 사용자를 그대로 넘긴다.
+     */
+    private static final AuthUser AUTH_USER = authUser();
+
+    private static AuthUser authUser() {
+        UserResponse user = new UserResponse();
+        ReflectionTestUtils.setField(user, "id", 7L);
+        return new AuthUser(user, "Bearer token");
+    }
 
     @Test
     void 아직_끝나지_않은_작업은_구독만_붙이고_완료_이벤트를_보내지_않는다() {
         when(aiMetaDataService.findFinished("job-1")).thenReturn(null);
 
-        SseEmitter emitter = controller.subscribe(TOKEN, "job-1");
+        SseEmitter emitter = controller.subscribe(AUTH_USER, "job-1");
 
         assertThat(sseEmitterRepository.get("job-1")).isSameAs(emitter);
     }
@@ -95,7 +97,7 @@ class AiMetaDataControllerSseTest {
     @Test
     void 분석이_끝나도_구독을_닫지_않고_면접_준비를_기다린다() {
         when(aiMetaDataService.findFinished("job-2")).thenReturn(null);
-        SseEmitter emitter = controller.subscribe(TOKEN, "job-2");
+        SseEmitter emitter = controller.subscribe(AUTH_USER, "job-2");
 
         CallbackSuccessRequest request = analysisCallback("job-2");
         when(aiMetaDataService.saveResult(request)).thenReturn(saved("job-2", "succeeded"));
@@ -109,7 +111,7 @@ class AiMetaDataControllerSseTest {
     @Test
     void 분석이_실패하면_구독을_닫는다() {
         when(aiMetaDataService.findFinished("job-3")).thenReturn(null);
-        controller.subscribe(TOKEN, "job-3");
+        controller.subscribe(AUTH_USER, "job-3");
 
         CallbackSuccessRequest request = analysisCallback("job-3");
         when(aiMetaDataService.saveResult(request)).thenReturn(saved("job-3", "failed"));
@@ -125,7 +127,7 @@ class AiMetaDataControllerSseTest {
         when(aiMetaDataService.findFinished("job-4")).thenReturn(saved("job-4", "succeeded"));
         when(questionTailorService.findPreparationEvent("job-4")).thenReturn(null);
 
-        SseEmitter emitter = controller.subscribe(TOKEN, "job-4");
+        SseEmitter emitter = controller.subscribe(AUTH_USER, "job-4");
 
         assertThat(sseEmitterRepository.get("job-4")).isSameAs(emitter);
     }
@@ -138,7 +140,7 @@ class AiMetaDataControllerSseTest {
                 .thenReturn(new QuestionTailorService.PreparationEvent(SseNotifier.INTERVIEW_READY,
                         InterviewReadyResponse.ready(3L, "sess-1", true)));
 
-        controller.subscribe(TOKEN, "job-5");
+        controller.subscribe(AUTH_USER, "job-5");
 
         assertThat(sseEmitterRepository.get("job-5")).isNull();
     }
@@ -174,7 +176,7 @@ class AiMetaDataControllerSseTest {
                 .thenReturn(new QuestionTailorService.PreparationEvent(SseNotifier.INTERVIEW_READY,
                         InterviewReadyResponse.ready(3L, "sess-1", true)));
 
-        SseEmitter emitter = controller.subscribe(TOKEN, "job-7");
+        SseEmitter emitter = controller.subscribe(AUTH_USER, "job-7");
 
         assertThat(emitter).isNotSameAs(other);
         assertThat(sseEmitterRepository.get("job-7")).isNull();
@@ -255,7 +257,7 @@ class AiMetaDataControllerSseTest {
     @Test
     void 저장하지_못한_콜백은_흘려보내지_않는다() {
         when(aiMetaDataService.findFinished("job-11")).thenReturn(null);
-        SseEmitter emitter = controller.subscribe(TOKEN, "job-11");
+        SseEmitter emitter = controller.subscribe(AUTH_USER, "job-11");
 
         CallbackSuccessRequest request = CallbackSuccessRequest.builder()
                 .status("succeeded")

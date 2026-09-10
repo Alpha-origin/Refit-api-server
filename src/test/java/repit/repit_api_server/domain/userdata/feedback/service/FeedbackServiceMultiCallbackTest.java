@@ -30,7 +30,6 @@ import repit.repit_api_server.domain.userdata.question.entity.QuestionEntity;
 import repit.repit_api_server.domain.userdata.question.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 
 import java.util.List;
 import java.util.Optional;
@@ -70,8 +69,6 @@ class FeedbackServiceMultiCallbackTest {
     private AnswerRepository answerRepository;
     @Mock
     private AiServerClient aiServerClient;
-    @Mock
-    private AuthServerClient authServerClient;
 
     @Captor
     private ArgumentCaptor<List<FeedbackPersonaEntity>> savedPersonas;
@@ -84,7 +81,7 @@ class FeedbackServiceMultiCallbackTest {
     void setUp() {
         service = new FeedbackService(feedbackRepository, feedbackItemRepository, feedbackPersonaRepository,
                 interviewRepository, interviewPersonaRepository, personaRepository, questionRepository,
-                answerRepository, aiServerClient, authServerClient);
+                answerRepository, aiServerClient);
 
         when(feedbackRepository.save(any(FeedbackEntity.class)))
                 .thenAnswer(invocation -> invocation.getArgument(0));

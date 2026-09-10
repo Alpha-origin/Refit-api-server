@@ -22,10 +22,8 @@ import repit.repit_api_server.domain.userdata.persona.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.persona.repository.PersonaRepository;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.client.ChatServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
-import repit.repit_api_server.global.response.UserResponse;
 
 import java.util.Optional;
 
@@ -49,8 +47,6 @@ class InterviewServiceCreateTest {
     @Mock
     private ChatServerClient chatServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private AnswerRepository answerRepository;
     @Mock
     private PersonaRepository personaRepository;
@@ -59,17 +55,17 @@ class InterviewServiceCreateTest {
     @Mock
     private InterviewPersonaRepository interviewPersonaRepository;
 
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
+
     private InterviewService service;
 
     @BeforeEach
     void setUp() {
         service = new InterviewService(interviewRepository, questionRepository, chatServerClient,
-                authServerClient, answerRepository, personaRepository, questionTailorService,
+                answerRepository, personaRepository, questionTailorService,
                 interviewPersonaRepository);
 
-        UserResponse user = mock(UserResponse.class);
-        when(user.getId()).thenReturn(7L);
-        when(authServerClient.getUser("Bearer t")).thenReturn(user);
 
         when(personaRepository.findById(1L)).thenReturn(Optional.of(persona()));
         when(personaRepository.findByPersonaName("압박 면접관")).thenReturn(Optional.of(persona()));
@@ -91,7 +87,7 @@ class InterviewServiceCreateTest {
 
     @Test
     void personaId가_있으면_이름은_보지_않는다() {
-        InterviewResponse response = service.createInterview("Bearer t",
+        InterviewResponse response = service.createInterview(USER_ID,
                 new CreateInterviewRequest(1L, "무시되는 이름", null));
 
         assertThat(response.getPersonaId()).isEqualTo(1L);
@@ -101,7 +97,7 @@ class InterviewServiceCreateTest {
 
     @Test
     void personaId가_없으면_이름으로_찾는다() {
-        InterviewResponse response = service.createInterview("Bearer t",
+        InterviewResponse response = service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, "압박 면접관", null));
 
         assertThat(response.getPersonaId()).isEqualTo(1L);
@@ -110,7 +106,7 @@ class InterviewServiceCreateTest {
 
     @Test
     void 페르소나를_아예_지정하지_않으면_422다() {
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, "  ", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
@@ -121,21 +117,10 @@ class InterviewServiceCreateTest {
     void 없는_페르소나를_지정하면_404다() {
         when(personaRepository.findByPersonaName("없는 면접관")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
+        assertThatThrownBy(() -> service.createInterview(USER_ID,
                 new CreateInterviewRequest(null, "없는 면접관", null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getStatus())
                 .isEqualTo(HttpStatus.NOT_FOUND);
-    }
-
-    @Test
-    void 사용자를_확인할_수_없으면_401이다() {
-        when(authServerClient.getUser("Bearer bad")).thenReturn(null);
-
-        assertThatThrownBy(() -> service.createInterview("Bearer bad",
-                new CreateInterviewRequest(1L, null, null)))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getStatus())
-                .isEqualTo(HttpStatus.UNAUTHORIZED);
     }
 }

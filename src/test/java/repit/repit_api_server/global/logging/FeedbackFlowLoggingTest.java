@@ -13,14 +13,20 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.web.method.annotation.AuthenticationPrincipalArgumentResolver;
+import org.springframework.test.util.ReflectionTestUtils;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.setup.MockMvcBuilders;
 import repit.repit_api_server.domain.userdata.feedback.controller.FeedbackController;
 import repit.repit_api_server.domain.userdata.feedback.dto.request.FeedbackCallbackRequest;
 import repit.repit_api_server.domain.userdata.feedback.dto.response.FeedbackAcceptedResponse;
 import repit.repit_api_server.domain.userdata.feedback.service.FeedbackService;
+import repit.repit_api_server.global.auth.AuthUser;
 import repit.repit_api_server.global.error.GlobalExceptionHandler;
 import repit.repit_api_server.global.exception.BusinessException;
+import repit.repit_api_server.global.response.UserResponse;
 
 import java.util.List;
 
@@ -64,9 +70,18 @@ class FeedbackFlowLoggingTest {
     @BeforeEach
     void setUp() {
         mockMvc = MockMvcBuilders.standaloneSetup(new FeedbackController(feedbackService))
+                // 컨트롤러가 @AuthenticationPrincipal로 사용자를 받는다. standalone 설정에는
+                // 시큐리티가 없어 이 리졸버를 직접 붙이지 않으면 인자가 null로 들어간다.
+                .setCustomArgumentResolvers(new AuthenticationPrincipalArgumentResolver())
                 .addFilters(new RequestLoggingFilter(HttpLoggingProperties.defaults()))
                 .setControllerAdvice(new GlobalExceptionHandler())
                 .build();
+
+        // 인증은 시큐리티 필터가 끝낸 뒤라고 본다. 이 테스트가 보는 것은 그 뒤의 로그다.
+        UserResponse user = new UserResponse();
+        ReflectionTestUtils.setField(user, "id", 7L);
+        SecurityContextHolder.getContext().setAuthentication(new UsernamePasswordAuthenticationToken(
+                new AuthUser(user, "Bearer token"), null, List.of()));
 
         filterLogger = (Logger) LoggerFactory.getLogger(RequestLoggingFilter.class);
         capturedLogs = new ListAppender<>();
@@ -77,6 +92,7 @@ class FeedbackFlowLoggingTest {
     @AfterEach
     void tearDown() {
         filterLogger.detachAppender(capturedLogs);
+        SecurityContextHolder.clearContext();
     }
 
     @Test

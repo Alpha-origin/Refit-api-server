@@ -33,9 +33,7 @@ import repit.repit_api_server.domain.userdata.question.entity.QuestionEntity;
 import repit.repit_api_server.domain.userdata.question.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
-import repit.repit_api_server.global.response.UserResponse;
 
 import java.time.Duration;
 import java.time.LocalDateTime;
@@ -72,7 +70,6 @@ public class FeedbackService {
     private final QuestionRepository questionRepository;
     private final AnswerRepository answerRepository;
     private final AiServerClient aiServerClient;
-    private final AuthServerClient authServerClient;
 
     @Value("${app.callback-base-url}")
     private String callbackBaseUrl;
@@ -85,8 +82,7 @@ public class FeedbackService {
     // 외부 서버 호출이 세 번 들어가므로 트랜잭션으로 감싸지 않는다.
     // 감싸면 느린 HTTP 응답을 기다리는 내내 DB 커넥션을 붙잡게 된다.
     // 개별 저장은 각 리포지토리 호출이 자체 트랜잭션으로 처리한다.
-    public FeedbackAcceptedResponse requestFeedback(String authorization, Long interviewId) {
-        Long userId = currentUserId(authorization);
+    public FeedbackAcceptedResponse requestFeedback(Long userId, Long interviewId) {
 
         InterviewEntity interview = findInterview(interviewId);
         verifyOwner(interview.getUserId(), userId);
@@ -453,14 +449,6 @@ public class FeedbackService {
         feedback.setStatus(FeedbackStatus.FAILED);
         feedback.setErrorMessage("피드백 생성 결과를 제때 받지 못했습니다. 다시 시도해주세요.");
         feedbackRepository.save(feedback);
-    }
-
-    private Long currentUserId(String authorization) {
-        UserResponse user = authServerClient.getUser(authorization);
-        if (user == null || user.getId() == null) {
-            throw BusinessException.unauthorized("사용자 정보를 확인할 수 없습니다. 다시 로그인해주세요.");
-        }
-        return user.getId();
     }
 
     // 면접 답변과 평가는 본인만 볼 수 있어야 한다.
@@ -895,8 +883,7 @@ public class FeedbackService {
     }
 
     // 인증 서버 호출이 들어가므로 마찬가지로 트랜잭션 밖에서 처리한다.
-    public FeedbackResponse getFeedback(String authorization, Long interviewId) {
-        Long userId = currentUserId(authorization);
+    public FeedbackResponse getFeedback(Long userId, Long interviewId) {
 
         FeedbackEntity feedback = feedbackRepository.findTopByInterviewIdOrderByCreatedAtDesc(interviewId)
                 .orElseThrow(() -> BusinessException.notFound("피드백이 없습니다. 먼저 피드백 생성을 요청해주세요."));
@@ -925,8 +912,7 @@ public class FeedbackService {
      * <p>같은 면접을 다시 채점하면 기록이 새로 쌓인다. 단건 조회가 늘 마지막 채점만 보여주므로
      * 목록도 같은 기준으로 맞춘다. 그러지 않으면 한 면접이 여러 번 늘어서 보인다.
      */
-    public List<FeedbackResponse> getAllFeedbacks(String authorization) {
-        Long userId = currentUserId(authorization);
+    public List<FeedbackResponse> getAllFeedbacks(Long userId) {
 
         List<FeedbackEntity> feedbacks = latestPerInterview(
                 feedbackRepository.findAllByUserIdOrderByCreatedAtDesc(userId));

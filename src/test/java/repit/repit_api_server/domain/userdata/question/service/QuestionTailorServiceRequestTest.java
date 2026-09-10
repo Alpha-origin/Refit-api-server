@@ -32,7 +32,6 @@ import repit.repit_api_server.domain.userdata.question.entity.QuestionTailorEnti
 import repit.repit_api_server.domain.userdata.question.repository.QuestionTailorRepository;
 import repit.repit_api_server.domain.metadata.sse.SseNotifier;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 import tools.jackson.databind.ObjectMapper;
@@ -73,8 +72,6 @@ class QuestionTailorServiceRequestTest {
     @Mock
     private AiServerClient aiServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private ChatInterviewHandoffService chatInterviewHandoffService;
 
     @Mock
@@ -87,7 +84,7 @@ class QuestionTailorServiceRequestTest {
     void setUp() {
         service = new QuestionTailorService(questionTailorRepository, interviewRepository,
                 interviewPersonaRepository, personaRepository,
-                analysisDataRepository, aiServerClient, authServerClient, chatInterviewHandoffService, sseNotifier,
+                analysisDataRepository, aiServerClient, chatInterviewHandoffService, sseNotifier,
                 new ObjectMapper());
 
         user = mock(UserResponse.class);

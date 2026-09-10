@@ -33,7 +33,6 @@ import repit.repit_api_server.domain.userdata.persona.repository.PersonaReposito
 import repit.repit_api_server.domain.userdata.question.entity.QuestionEntity;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 import repit.repit_api_server.global.response.UserResponse;
 
@@ -78,8 +77,9 @@ class FeedbackServiceSoloRequestTest {
     private AnswerRepository answerRepository;
     @Mock
     private AiServerClient aiServerClient;
-    @Mock
-    private AuthServerClient authServerClient;
+
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
 
     private FeedbackService service;
 
@@ -87,12 +87,11 @@ class FeedbackServiceSoloRequestTest {
     void setUp() {
         service = new FeedbackService(feedbackRepository, feedbackItemRepository, feedbackPersonaRepository,
                 interviewRepository, interviewPersonaRepository, personaRepository, questionRepository,
-                answerRepository, aiServerClient, authServerClient);
+                answerRepository, aiServerClient);
         ReflectionTestUtils.setField(service, "callbackBaseUrl", "https://api.repit.test");
 
         UserResponse user = mock(UserResponse.class);
         when(user.getId()).thenReturn(7L);
-        when(authServerClient.getUser("Bearer token")).thenReturn(user);
 
         when(interviewRepository.findById(3L)).thenReturn(Optional.of(interview(Status.COMPLETED, 5L)));
         when(feedbackRepository.findTopByInterviewIdOrderByCreatedAtDesc(3L)).thenReturn(Optional.empty());
@@ -186,7 +185,7 @@ class FeedbackServiceSoloRequestTest {
 
     @Test
     void 면접_내용을_우리_DB에서_읽는다() {
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         FeedbackSoloRequest request = captureRequest();
         assertThat(request.getQuestions()).extracting(FeedbackSoloRequest.Question::getQuestionId)
@@ -198,7 +197,7 @@ class FeedbackServiceSoloRequestTest {
 
     @Test
     void 꼬리질문에만_부모를_싣는다() {
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         List<FeedbackSoloRequest.Question> questions = captureRequest().getQuestions();
         // ORIGINAL에 parentId가 실려 있거나 FOLLOW에 없으면 분석 서버가 요청 전체를 거부한다.
@@ -208,7 +207,7 @@ class FeedbackServiceSoloRequestTest {
 
     @Test
     void 답변에는_저장된_답변_번호를_싣는다() {
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         FeedbackSoloRequest.Answer answer = captureRequest().getAnswers().get(0);
         assertThat(answer.getAnswerId()).isEqualTo("501");
@@ -218,7 +217,7 @@ class FeedbackServiceSoloRequestTest {
 
     @Test
     void 오프셋_없는_시각을_UTC로_옮겨_보낸다() {
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         FeedbackSoloRequest request = captureRequest();
         assertThat(request.getQuestions().get(0).getCreatedAt())
@@ -231,7 +230,7 @@ class FeedbackServiceSoloRequestTest {
     void 면접관_성향은_우리_DB에서_읽는다() {
         when(personaRepository.findById(5L)).thenReturn(Optional.of(persona(Type.METICULOUS)));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         assertThat(captureRequest().getPersonaType()).isEqualTo("METICULOUS");
     }
@@ -240,7 +239,7 @@ class FeedbackServiceSoloRequestTest {
     void 면접관_어조도_성향과_함께_보낸다() {
         when(personaRepository.findById(5L)).thenReturn(Optional.of(persona(Type.METICULOUS)));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         // 어조는 성향과 독립된 축이다. 성향만 보내면 분석 서버가 세기를 성향에서 유추하게 된다.
         assertThat(captureRequest().getPersonaTone()).isEqualTo("PRESSURING");
@@ -254,7 +253,7 @@ class FeedbackServiceSoloRequestTest {
                 InterviewPersonaEntity.builder().interviewId(3L).personaId(6L).personaOrder(1).build()));
         when(personaRepository.findAllById(List.of(5L, 6L))).thenReturn(List.of(persona(Type.REALISTIC), hrPersona()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         // 1:1 채점에 태우면 질문이 누구 것인지 잃고 면접관별 평가도 오지 않는다.
         verify(aiServerClient, never()).requestSoloFeedback(any());
@@ -301,7 +300,7 @@ class FeedbackServiceSoloRequestTest {
                         .createdAt(LocalDateTime.parse("2026-08-18T01:02:00"))
                         .build()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         ArgumentCaptor<FeedbackMultiRequest> sent = ArgumentCaptor.forClass(FeedbackMultiRequest.class);
         verify(aiServerClient).requestMultiFeedback(sent.capture());
@@ -323,7 +322,7 @@ class FeedbackServiceSoloRequestTest {
                         .createdAt(LocalDateTime.parse("2026-08-18T01:02:00"))
                         .build()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         // 분석 서버는 빈 의도를 받지 않는다. 한 건 때문에 면접 전체가 채점되지 않으면 안 된다.
         List<FeedbackSoloRequest.Question> questions = captureRequest().getQuestions();
@@ -344,7 +343,7 @@ class FeedbackServiceSoloRequestTest {
                         .createdAt(LocalDateTime.parse("2026-08-18T01:04:00"))
                         .build()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         assertThat(captureRequest().getAnswers()).extracting(FeedbackSoloRequest.Answer::getAnswerId)
                 .containsExactly("501");
@@ -365,7 +364,7 @@ class FeedbackServiceSoloRequestTest {
                         .createdAt(LocalDateTime.parse("2026-08-18T01:02:00"))
                         .build()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         // 부모 없는 FOLLOW를 그대로 보내면 분석 서버가 요청 전체를 422로 거부한다.
         List<FeedbackSoloRequest.Question> questions = captureRequest().getQuestions();
@@ -398,7 +397,7 @@ class FeedbackServiceSoloRequestTest {
                         .createdAt(LocalDateTime.parse("2026-08-18T01:02:40"))
                         .build()));
 
-        service.requestFeedback("Bearer token", 3L);
+        service.requestFeedback(USER_ID, 3L);
 
         List<FeedbackSoloRequest.Question> questions = captureRequest().getQuestions();
         assertThat(questions.get(0).getType())
@@ -412,7 +411,7 @@ class FeedbackServiceSoloRequestTest {
         when(questionRepository.findAllByInterviewIdOrderByQuestionIdAsc(3L)).thenReturn(List.of());
         when(answerRepository.findAllByInterviewIdOrderByAnswerIdAsc(3L)).thenReturn(List.of());
 
-        assertThatThrownBy(() -> service.requestFeedback("Bearer token", 3L))
+        assertThatThrownBy(() -> service.requestFeedback(USER_ID, 3L))
                 .isInstanceOf(BusinessException.class)
                 .hasMessageContaining("면접이 아직 끝나지 않았습니다");
 

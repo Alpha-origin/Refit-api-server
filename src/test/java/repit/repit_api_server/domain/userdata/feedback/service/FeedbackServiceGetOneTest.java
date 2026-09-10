@@ -28,7 +28,6 @@ import repit.repit_api_server.domain.userdata.persona.entity.enums.Type;
 import repit.repit_api_server.domain.userdata.persona.repository.PersonaRepository;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.response.UserResponse;
 
 import java.time.Duration;
@@ -73,8 +72,9 @@ class FeedbackServiceGetOneTest {
     private AnswerRepository answerRepository;
     @Mock
     private AiServerClient aiServerClient;
-    @Mock
-    private AuthServerClient authServerClient;
+
+    /** 인증을 마친 요청의 주인. 확인은 시큐리티 필터가 끝냈고, 서비스는 id만 받는다. */
+    private static final Long USER_ID = 7L;
 
     private FeedbackService service;
 
@@ -82,11 +82,10 @@ class FeedbackServiceGetOneTest {
     void setUp() {
         service = new FeedbackService(feedbackRepository, feedbackItemRepository, feedbackPersonaRepository,
                 interviewRepository, interviewPersonaRepository, personaRepository, questionRepository,
-                answerRepository, aiServerClient, authServerClient);
+                answerRepository, aiServerClient);
         ReflectionTestUtils.setField(service, "callbackBaseUrl", "https://api.repit.test");
         ReflectionTestUtils.setField(service, "pendingTimeout", Duration.ofMinutes(5));
 
-        when(authServerClient.getUser(anyString())).thenReturn(user(7L));
         when(feedbackRepository.findTopByInterviewIdOrderByCreatedAtDesc(100L))
                 .thenReturn(Optional.of(feedback()));
         when(feedbackPersonaRepository.findAllByFeedbackIdOrderBySortOrderAsc(10L)).thenReturn(List.of());
@@ -98,7 +97,7 @@ class FeedbackServiceGetOneTest {
         when(interviewRepository.findById(100L))
                 .thenReturn(Optional.of(interview(InterviewMode.MULTI)));
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
     }
@@ -108,7 +107,7 @@ class FeedbackServiceGetOneTest {
         when(interviewRepository.findById(100L))
                 .thenReturn(Optional.of(interview(InterviewMode.SOLO)));
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getMode()).isEqualTo(InterviewMode.SOLO);
     }
@@ -117,7 +116,7 @@ class FeedbackServiceGetOneTest {
     void 면접이_남아_있지_않아도_채점_결과는_그대로_준다() {
         when(interviewRepository.findById(100L)).thenReturn(Optional.empty());
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getMode()).isNull();
         assertThat(response.getTotalScore()).isEqualTo(80);
@@ -130,7 +129,7 @@ class FeedbackServiceGetOneTest {
         when(personaRepository.findAllById(any()))
                 .thenReturn(List.of(persona(5L, Type.METICULOUS, Level.HARD)));
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getStyle()).isEqualTo(Type.METICULOUS);
         assertThat(response.getLevel()).isEqualTo(Level.HARD);
@@ -146,7 +145,7 @@ class FeedbackServiceGetOneTest {
         when(personaRepository.findAllById(any()))
                 .thenReturn(List.of(persona(5L, Type.METICULOUS, Level.HARD)));
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getStyle()).isEqualTo(Type.METICULOUS);
         assertThat(response.getLevel()).isEqualTo(Level.HARD);
@@ -167,7 +166,7 @@ class FeedbackServiceGetOneTest {
         when(personaRepository.findAllById(any()))
                 .thenReturn(List.of(persona(5L, Type.FRIENDLY, Level.EASY)));
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getStatus()).isEqualTo(FeedbackStatus.PENDING);
         assertThat(response.getStyle()).isEqualTo(Type.FRIENDLY);
@@ -180,7 +179,7 @@ class FeedbackServiceGetOneTest {
                 .thenReturn(Optional.of(interview(InterviewMode.SOLO, 5L)));
         when(personaRepository.findAllById(any())).thenReturn(List.of());
 
-        FeedbackResponse response = service.getFeedback("Bearer token", 100L);
+        FeedbackResponse response = service.getFeedback(USER_ID, 100L);
 
         assertThat(response.getStyle()).isNull();
         assertThat(response.getLevel()).isNull();

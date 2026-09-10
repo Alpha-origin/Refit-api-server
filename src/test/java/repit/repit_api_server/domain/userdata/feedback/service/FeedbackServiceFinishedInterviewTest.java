@@ -34,7 +34,6 @@ import repit.repit_api_server.domain.userdata.persona.repository.PersonaReposito
 import repit.repit_api_server.domain.userdata.question.entity.QuestionEntity;
 import repit.repit_api_server.domain.userdata.question.repository.QuestionRepository;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.BusinessException;
 
 import java.time.Duration;
@@ -78,8 +77,6 @@ class FeedbackServiceFinishedInterviewTest {
     private AnswerRepository answerRepository;
     @Mock
     private AiServerClient aiServerClient;
-    @Mock
-    private AuthServerClient authServerClient;
 
     private FeedbackService service;
 
@@ -87,7 +84,7 @@ class FeedbackServiceFinishedInterviewTest {
     void setUp() {
         service = new FeedbackService(feedbackRepository, feedbackItemRepository, feedbackPersonaRepository,
                 interviewRepository, interviewPersonaRepository, personaRepository, questionRepository,
-                answerRepository, aiServerClient, authServerClient);
+                answerRepository, aiServerClient);
         ReflectionTestUtils.setField(service, "callbackBaseUrl", "https://api.repit.test");
         ReflectionTestUtils.setField(service, "pendingTimeout", Duration.ofMinutes(5));
 
@@ -166,8 +163,6 @@ class FeedbackServiceFinishedInterviewTest {
         service.requestFeedbackForFinishedInterview(3L);
 
         verify(aiServerClient).requestSoloFeedback(any());
-        // 사용자 조회는 토큰이 있어야 한다. 여기서 부르면 채팅 서버 호출이 401로 끝난다.
-        verify(authServerClient, never()).getUser(any());
 
         ArgumentCaptor<FeedbackEntity> saved = ArgumentCaptor.forClass(FeedbackEntity.class);
         verify(feedbackRepository).save(saved.capture());

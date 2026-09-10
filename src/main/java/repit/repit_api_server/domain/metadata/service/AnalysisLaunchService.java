@@ -9,9 +9,7 @@ import repit.repit_api_server.domain.metadata.dto.request.GenerateRequest;
 import repit.repit_api_server.domain.metadata.dto.response.GenerateResponse;
 import repit.repit_api_server.domain.metadata.dto.response.MetaDataResponse;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.ExternalApiException;
-import repit.repit_api_server.global.response.UserResponse;
 
 import java.time.LocalDateTime;
 import java.util.function.Function;
@@ -23,6 +21,9 @@ import java.util.function.Function;
  * 붙여두면 다른 길로 시작한 분석은 주인 없이 남는다. 주인 없는 분석으로는 면접이 열리지 않는다.
  * 면접 시작이 사용자의 최근 완료 분석을 집어 드는 것으로 시작하기 때문이다. 그래서 요청과 접수를
  * 한 묶음으로 두고 두 길이 같은 것을 쓰게 한다.
+ *
+ * <p>소유자는 시큐리티 필터가 이미 확인한 사용자다. 예전에는 여기서 인증 서버에 한 번 더 물었고,
+ * 그 조회가 실패하면 주인 없는 분석이 남았다. 이제 인증되지 않은 요청은 여기까지 오지 않는다.
  */
 @Service
 @RequiredArgsConstructor
@@ -33,32 +34,26 @@ public class AnalysisLaunchService {
     private static final String CALLBACK_PATH = "/api/v1/ai/callback";
 
     private final AiServerClient aiServerClient;
-    private final AuthServerClient authServerClient;
     private final AiMetaDataService aiMetaDataService;
 
     @Value("${app.callback-base-url}")
     private String callbackBaseUrl;
 
-    public GenerateResponse launch(String authorization, MetaDataResponse metaData) {
-        return launch(authorization, metaData, aiServerClient::generate);
+    public GenerateResponse launch(Long userId, MetaDataResponse metaData) {
+        return launch(userId, metaData, aiServerClient::generate);
     }
 
-    public GenerateResponse launchMock(String authorization, MetaDataResponse metaData) {
-        return launch(authorization, metaData, aiServerClient::generateMock);
+    public GenerateResponse launchMock(Long userId, MetaDataResponse metaData) {
+        return launch(userId, metaData, aiServerClient::generateMock);
     }
 
-    private GenerateResponse launch(String authorization, MetaDataResponse metaData,
+    private GenerateResponse launch(Long userId, MetaDataResponse metaData,
                                     Function<GenerateRequest, GenerateResponse> call) {
         GenerateRequest request = GenerateRequest.builder()
                 .portfolio_url(metaData.getFileUrl())
                 .github_urls(metaData.getGitUrls())
                 .callback_url(callbackBaseUrl + CALLBACK_PATH)
                 .build();
-
-        // 소유자는 분석 서버에 요청하기 전에 확인해둔다. 접수는 분석 서버가 jobId를 돌려줘야
-        // 할 수 있는데, 그 응답이 콜백보다 늦게 오는 일이 있다. 그때 사용자 조회까지 뒤에 두면
-        // 소유자가 더 늦게 붙고, 그 사이 도착한 콜백이 만든 행은 주인 없이 남는다.
-        Long userId = resolveOwner(authorization);
 
         // 분석 서버에 넘기기 직전 시각. 이 작업에 남아 있는 결과가 지난 실행의 것인지 가르는 기준이다.
         LocalDateTime requestedAt = LocalDateTime.now();
@@ -68,28 +63,9 @@ public class AnalysisLaunchService {
     }
 
     /**
-     * 이 분석을 누구 것으로 남길지 확인한다.
-     *
-     * <p>확인하지 못해도 요청 자체는 진행한다. 여기서 막으면 분석을 아예 시작하지 못한다.
-     */
-    private Long resolveOwner(String authorization) {
-        try {
-            UserResponse user = authServerClient.getUser(authorization);
-            if (user != null && user.getId() != null) {
-                return user.getId();
-            }
-            log.error("분석 작업의 소유자를 확인하지 못했습니다. 사용자 정보가 비어 있습니다.");
-        } catch (RuntimeException e) {
-            log.error("분석 작업의 소유자를 확인하지 못했습니다.", e);
-        }
-        return null;
-    }
-
-    /**
      * 이번 분석 실행을 접수한다. 소유자를 기록하고, 같은 jobId에 남아 있던 지난 결과를 걷어낸다.
      *
      * <p>걷어내지 않으면 구독이 붙는 순간 분석 서버의 콜백보다 먼저 옛 결과가 완료 이벤트로 나간다.
-     * 그래서 소유자를 확인하지 못했더라도 접수 자체는 한다.
      *
      * <p>다만 이 시점에는 분석 서버가 이미 작업을 접수한 뒤다. 기록이 실패했다고 요청 전체를
      * 실패시키면 클라이언트가 jobId를 받지 못해 결과를 영영 조회할 수 없게 되므로, 기록 실패는
@@ -102,11 +78,6 @@ public class AnalysisLaunchService {
                     response == null ? null : response.getStatus(),
                     response == null ? null : response.getMessage());
             throw new ExternalApiException("분석 서버가 작업 번호를 돌려주지 않았습니다.", null, null);
-        }
-
-        if (userId == null) {
-            log.error("소유자 없이 분석 작업을 접수합니다. 이 결과로는 면접을 열 수 없습니다. jobId={}",
-                    response.getJobId());
         }
 
         try {

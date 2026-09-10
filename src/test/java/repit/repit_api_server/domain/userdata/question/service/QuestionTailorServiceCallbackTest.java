@@ -22,7 +22,6 @@ import repit.repit_api_server.domain.userdata.question.entity.enums.TailorStatus
 import repit.repit_api_server.domain.userdata.question.repository.QuestionTailorRepository;
 import repit.repit_api_server.domain.metadata.sse.SseNotifier;
 import repit.repit_api_server.global.client.AiServerClient;
-import repit.repit_api_server.global.client.AuthServerClient;
 import repit.repit_api_server.global.exception.ExternalApiException;
 import tools.jackson.databind.ObjectMapper;
 
@@ -56,8 +55,6 @@ class QuestionTailorServiceCallbackTest {
     @Mock
     private AiServerClient aiServerClient;
     @Mock
-    private AuthServerClient authServerClient;
-    @Mock
     private ChatInterviewHandoffService chatInterviewHandoffService;
 
     @Captor
@@ -72,7 +69,7 @@ class QuestionTailorServiceCallbackTest {
     void setUp() {
         service = new QuestionTailorService(questionTailorRepository, interviewRepository,
                 interviewPersonaRepository, personaRepository,
-                analysisDataRepository, aiServerClient, authServerClient, chatInterviewHandoffService, sseNotifier,
+                analysisDataRepository, aiServerClient, chatInterviewHandoffService, sseNotifier,
                 new ObjectMapper());
 
         // 넘길 권리를 차지한 상태를 기본으로 둔다. 차지하지 못하는 경우는 따로 검증한다.

@@ -19,7 +19,8 @@ import repit.repit_api_server.domain.metadata.sse.SseEmitters;
 import repit.repit_api_server.domain.metadata.sse.SseNotifier;
 import repit.repit_api_server.domain.metadata.sse.SseSubscription;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
-import repit.repit_api_server.global.auth.CurrentUser;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import repit.repit_api_server.global.auth.AuthUser;
 import repit.repit_api_server.global.client.AiServerClient;
 import repit.repit_api_server.global.common.ApiResponse;
 
@@ -40,7 +41,6 @@ public class AiMetaDataController {
     private final SseEmitterRepository sseEmitterRepository;
     private final SseNotifier sseNotifier;
     private final QuestionTailorService questionTailorService;
-    private final CurrentUser currentUser;
 
     private final AiServerClient aiServerClient;
     private final AnalysisLaunchService analysisLaunchService;
@@ -51,15 +51,15 @@ public class AiMetaDataController {
      *
      * <p>토큰은 헤더로 받는다. 쿼리 파라미터로 받으면 접속 URL이 프록시 로그와 브라우저 기록에
      * 그대로 남는다. 브라우저 EventSource는 헤더를 실을 수 없으므로 웹은 헤더를 붙일 수 있는
-     * 구현으로 붙어야 한다.
+     * 구현으로 붙어야 한다. 헤더를 읽어 사용자를 확인하는 일은 시큐리티 필터가 먼저 끝낸다.
      */
     // 응답 타입을 못박아 둔다. 정하지 않으면 협상 결과에 따라 다른 타입으로 나갈 수 있고,
     // 그러면 중간의 프록시가 이벤트 스트림인 줄 모르고 버퍼에 모았다가 한꺼번에 흘려보낸다.
     @GetMapping(value = "/subscribe/{jobId}", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter subscribe(
-            @RequestHeader("Authorization") String authorization,
+            @AuthenticationPrincipal AuthUser authUser,
             @PathVariable String jobId) {
-        aiMetaDataService.verifyOwner(jobId, currentUser.require(authorization).getId());
+        aiMetaDataService.verifyOwner(jobId, authUser.id());
 
         SseSubscription emitter = new SseSubscription(SSE_TIMEOUT);
 
@@ -120,32 +120,34 @@ public class AiMetaDataController {
     }
 
     @PostMapping("/sendMetaData")
-    public ResponseEntity<MetaDataResponse> sendMetaData(@RequestHeader("Authorization") String authorization) {
-        MetaDataResponse forRequest = metaService.getMetaData(authorization);
+    public ResponseEntity<MetaDataResponse> sendMetaData(@AuthenticationPrincipal AuthUser authUser) {
+        // 인증 서버와 분석 서버 모두 사용자 토큰을 그대로 요구하는 자리다. 확인은 필터가 이미
+        // 마쳤고, 여기서는 그때 확인한 토큰을 다시 실어 보내기만 한다.
+        MetaDataResponse forRequest = metaService.getMetaData(authUser.token());
         MetaDataRequest request = MetaDataRequest.builder()
                 .gitUrls(forRequest.getGitUrls())
                 .fileUrl(forRequest.getFileUrl())
                 .build();
 
-        MetaDataResponse response = aiServerClient.sendMetaData(authorization, request);
+        MetaDataResponse response = aiServerClient.sendMetaData(authUser.token(), request);
         return ResponseEntity.ok(response);
     }
 
     // 이미 올려둔 자료로 분석만 다시 요청한다. 자료를 올리는 길과 같은 접수를 거친다.
     @PostMapping("/generate")
     public ResponseEntity<GenerateResponse> generate(
-            @RequestHeader("Authorization") String authorization
+            @AuthenticationPrincipal AuthUser authUser
     ) {
-        MetaDataResponse forRequest = metaService.getMetaData(authorization);
-        return ResponseEntity.ok(analysisLaunchService.launch(authorization, forRequest));
+        MetaDataResponse forRequest = metaService.getMetaData(authUser.token());
+        return ResponseEntity.ok(analysisLaunchService.launch(authUser.id(), forRequest));
     }
 
     @PostMapping("/generate-mock")
     public ResponseEntity<GenerateResponse> generateMock(
-            @RequestHeader("Authorization") String authorization
+            @AuthenticationPrincipal AuthUser authUser
     ) {
-        MetaDataResponse forRequest = metaService.getMetaData(authorization);
-        return ResponseEntity.ok(analysisLaunchService.launchMock(authorization, forRequest));
+        MetaDataResponse forRequest = metaService.getMetaData(authUser.token());
+        return ResponseEntity.ok(analysisLaunchService.launchMock(authUser.id(), forRequest));
     }
 
     /**
@@ -177,12 +179,11 @@ public class AiMetaDataController {
     // 분석 결과 조회. 면접 질문은 재작성이 끝나는 시점에 채팅 서버로 직접 넘어간다.
     @GetMapping
     public ApiResponse<ResultResponse> getResult(
-            @RequestHeader("Authorization") String authorization,
+            @AuthenticationPrincipal AuthUser authUser,
             @RequestParam String jobId
     ) {
         // 소유자 확인은 조회와 같은 트랜잭션에서 한다. 따로 부르면 같은 행을 두 번 읽으며
         // result jsonb를 두 번 풀어낸다.
-        Long userId = currentUser.require(authorization).getId();
-        return ApiResponse.success(aiMetaDataService.getResultForOwner(jobId, userId));
+        return ApiResponse.success(aiMetaDataService.getResultForOwner(jobId, authUser.id()));
     }
 }

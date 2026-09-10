@@ -2,11 +2,13 @@ package repit.repit_api_server.domain.userdata.question.controller;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.web.bind.annotation.*;
 import repit.repit_api_server.domain.userdata.question.dto.request.QuestionTailorCallbackRequest;
 import repit.repit_api_server.domain.userdata.question.dto.request.QuestionTailorMultiCallbackRequest;
 import repit.repit_api_server.domain.userdata.question.dto.response.QuestionTailorResponse;
 import repit.repit_api_server.domain.userdata.question.service.QuestionTailorService;
+import repit.repit_api_server.global.auth.AuthUser;
 import repit.repit_api_server.global.common.ApiResponse;
 
 @RestController
@@ -37,9 +39,9 @@ public class QuestionTailorController {
     // 면접 시작(POST /api/interviews) 이후 준비 상태를 확인하는 폴링용 조회.
     @GetMapping
     public ApiResponse<QuestionTailorResponse> getTailorResult(
-            @RequestHeader("Authorization") String authorization,
+            @AuthenticationPrincipal AuthUser authUser,
             @RequestParam Long interviewId
     ) {
-        return ApiResponse.success(questionTailorService.getTailorResult(authorization, interviewId));
+        return ApiResponse.success(questionTailorService.getTailorResult(authUser.id(), interviewId));
     }
 }
