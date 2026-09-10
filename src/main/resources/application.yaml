@@ -7,6 +7,16 @@ spring:
       max-file-size: 500MB
       max-request-size: 500MB
 
+  task:
+    scheduling:
+      pool:
+        # @Scheduled 작업이 나눠 쓰는 스레드 수. 정하지 않으면 1이라 모든 주기 작업이 한 줄로 선다.
+        # SSE 하트비트(15초)는 구독마다 블로킹 write라, 응답하지 않는 클라이언트 하나가 송신 버퍼를
+        # 채우면 그 자리에서 멈춘다. 스레드가 하나면 그 대기에 면접 준비 sweep(30초)까지 밀려,
+        # 시간이 지난 준비 건의 실패가 제때 나가지 않는다. 예외는 삼키고 있지만 느린 소켓은
+        # 예외가 아니라 대기라 그 방어에 걸리지 않는다.
+        size: 4
+
   datasource:
     url: ${DB_URL}
     username: ${DB_USERNAME}
