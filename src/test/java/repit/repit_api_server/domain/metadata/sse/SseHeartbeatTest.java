@@ -4,10 +4,20 @@ import org.junit.jupiter.api.Test;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.Executor;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -19,7 +29,8 @@ import static org.mockito.Mockito.verify;
 class SseHeartbeatTest {
 
     private final SseEmitterRepository repository = new SseEmitterRepository();
-    private final SseHeartbeat heartbeat = new SseHeartbeat(repository);
+    // 흐름을 그대로 좇으려고 같은 스레드에서 실행한다. 떼어둔 것을 확인하는 테스트는 각자 실행자를 세운다.
+    private final SseHeartbeat heartbeat = new SseHeartbeat(repository, Runnable::run);
 
     @Test
     void 살아있는_구독에는_빈_줄을_흘리고_그대로_둔다() throws IOException {
@@ -112,5 +123,81 @@ class SseHeartbeatTest {
 
         assertThat(repository.get("job-8")).isNull();
         verify(alive).send(any(SseEmitter.SseEventBuilder.class));
+    }
+
+    /**
+     * 구독에 쓰는 것은 블로킹이다. 받는 쪽이 읽지 않으면 그 write는 소켓 타임아웃까지 멈춰 있다.
+     * 한 스레드에서 순회하며 쓰면 그 대기에 뒤 순서 구독이 그 틱의 ping을 통째로 잃는다.
+     */
+    @Test
+    void 막힌_구독이_있어도_나머지_구독은_ping을_받는다() throws Exception {
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        SseHeartbeat isolating = new SseHeartbeat(repository, pool);
+
+        CountDownLatch release = new CountDownLatch(1);
+        SseSubscription stuck = mock(SseSubscription.class);
+        doAnswer(invocation -> {
+            release.await();
+            return null;
+        }).when(stuck).send(any(SseEmitter.SseEventBuilder.class));
+
+        CountDownLatch alivePinged = new CountDownLatch(1);
+        SseSubscription alive = mock(SseSubscription.class);
+        doAnswer(invocation -> {
+            alivePinged.countDown();
+            return null;
+        }).when(alive).send(any(SseEmitter.SseEventBuilder.class));
+
+        repository.save("job-10", stuck);
+        repository.save("job-11", alive);
+
+        try {
+            isolating.ping();
+
+            // 막힌 구독을 풀어주지 않은 채로 건너와야 한다. 떼어두지 않았다면 여기서 시간이 다 된다.
+            assertThat(alivePinged.await(2, TimeUnit.SECONDS)).isTrue();
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
+
+    /**
+     * 막힌 구독은 한 틱 안에 끝나지 않는다. 다음 틱이 또 띄우면 그 구독에만 작업이 쌓여,
+     * "하트비트가 밀린다"가 "작업이 무한히 쌓인다"로 바뀐다.
+     */
+    @Test
+    void 앞_틱의_ping이_아직_끝나지_않은_구독에는_또_띄우지_않는다() {
+        List<Runnable> queued = new ArrayList<>();
+        SseHeartbeat queueing = new SseHeartbeat(repository, queued::add);
+        repository.save("job-12", mock(SseSubscription.class));
+
+        queueing.ping();
+        queueing.ping();
+
+        assertThat(queued).hasSize(1);
+
+        // 앞의 ping이 끝나면 다음 틱은 다시 띄운다. 한 번 막혔다고 영영 멈추면 안 된다.
+        queued.getFirst().run();
+        queueing.ping();
+
+        assertThat(queued).hasSize(2);
+    }
+
+    /** 띄우지 못한 ping은 다음 틱에 다시 나가야 한다. 표시가 남으면 그 구독은 영영 ping을 잃는다. */
+    @Test
+    void 큐가_차서_띄우지_못해도_다음_틱에_다시_시도한다() {
+        AtomicInteger attempts = new AtomicInteger();
+        Executor rejecting = task -> {
+            attempts.incrementAndGet();
+            throw new RejectedExecutionException("큐가 찼습니다.");
+        };
+        SseHeartbeat rejected = new SseHeartbeat(repository, rejecting);
+        repository.save("job-13", mock(SseSubscription.class));
+
+        assertThatCode(rejected::ping).doesNotThrowAnyException();
+        assertThatCode(rejected::ping).doesNotThrowAnyException();
+
+        assertThat(attempts).hasValue(2);
     }
 }
