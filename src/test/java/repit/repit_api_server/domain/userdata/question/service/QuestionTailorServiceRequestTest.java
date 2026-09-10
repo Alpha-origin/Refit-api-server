@@ -410,6 +410,38 @@ class QuestionTailorServiceRequestTest {
                 .containsExactly("order-api/OrderService.java");
     }
 
+    /**
+     * 면접관 수는 사용자가 정한다. 기술 면접관 몫은 그대로고, 늘어난 인원만큼 신규 질문 몫이 붙는다.
+     * 여기서 인원을 흘리면 그만큼의 면접관이 질문 없이 앉아 있게 된다.
+     */
+    @Test
+    void N대1은_면접관이_넷_더_붙어도_그대로_실어_보낸다() {
+        when(interviewPersonaRepository.findAllByInterviewIdOrderByPersonaOrderAsc(3L)).thenReturn(List.of(
+                InterviewPersonaEntity.builder().interviewId(3L).personaId(11L).personaOrder(0).build(),
+                InterviewPersonaEntity.builder().interviewId(3L).personaId(12L).personaOrder(1).build(),
+                InterviewPersonaEntity.builder().interviewId(3L).personaId(13L).personaOrder(2).build(),
+                InterviewPersonaEntity.builder().interviewId(3L).personaId(15L).personaOrder(3).build(),
+                InterviewPersonaEntity.builder().interviewId(3L).personaId(16L).personaOrder(4).build()));
+        when(personaRepository.findAllById(List.of(11L, 12L, 13L, 15L, 16L))).thenReturn(List.of(
+                persona(11L, Role.TECH), persona(12L, Role.HR), persona(13L, Role.CEO),
+                persona(15L, Role.PM), persona(16L, Role.DESIGN)));
+
+        service.requestTailor(interview(InterviewMode.MULTI), user);
+
+        ArgumentCaptor<QuestionTailorMultiRequest> sent =
+                ArgumentCaptor.forClass(QuestionTailorMultiRequest.class);
+        verify(aiServerClient).tailorQuestionsMulti(sent.capture());
+        QuestionTailorMultiRequest request = sent.getValue();
+
+        // 저장된 진행 순서 그대로 나가야 질문 배열도 그 순서로 돌아온다.
+        assertThat(request.getOtherPersonas()).extracting(QuestionTailorMultiRequest.Persona::getRole)
+                .containsExactly("HR", "CEO", "PM", "DESIGN");
+        // 기술 면접관 몫은 인원이 늘어도 그대로다. 늘어나는 것은 신규 질문 쪽뿐이다.
+        assertThat(request.getTechPersona().getQuestionCount()).isEqualTo(2);
+        assertThat(request.getOtherPersonas())
+                .allSatisfy(persona -> assertThat(persona.getQuestionCount()).isEqualTo(2));
+    }
+
     /** 기대 답변이 비면 분석 서버가 요청 전체를 422로 거부한다. 콜백까지 갔다 오기 전에 막는다. */
     @Test
     void 기대_답변이_빈_원질문이면_보내지_않는다() {

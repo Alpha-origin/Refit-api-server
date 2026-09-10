@@ -54,17 +54,22 @@ public class InterviewService {
     private static final Logger log = LoggerFactory.getLogger(InterviewService.class);
 
     /**
-     * N:1 면접의 기술 외 면접관 수.
+     * N:1 면접의 기술 외 면접관 수 하한.
      *
-     * <p>기술 면접관 한 명은 반드시 있어야 한다. 원질문을 다시 쓰는 몫이 그 자리라 대신할 면접관이 없다.
-     * 나머지 직책은 정확히 이만큼이 붙어, N:1은 언제나 세 명이다.
-     *
-     * <p>인원이 곧 문항 수다. 기술 면접관이 두 문항, 나머지가 한 명당 두 문항을 맡아 N:1 면접은 여섯
-     * 문항으로 정해져 있다 — {@code QuestionTailorService.TECH_QUESTION_COUNT} 참고. 인원을 가변으로
-     * 두면 같은 N:1 면접인데 문항 수가 달라지므로, 늘리려면 문항 배분을 먼저 정하고 함께 바꾼다.
-     * (분석 서버 otherPersonas 자체는 네 명까지 받는다.)
+     * <p>기술 면접관 한 명은 따로 반드시 있어야 한다. 원질문을 다시 쓰는 몫이 그 자리라 대신할
+     * 면접관이 없다. 거기에 다른 직책이 최소 한 명은 붙어야 면접관이 교대하고, 그 교대가 곧
+     * N:1이 1:1과 갈리는 지점이다. 기술 면접관만 남으면 1:1을 N:1이라 부르는 것과 다르지 않다.
      */
-    private static final int OTHER_PERSONA_COUNT = 2;
+    private static final int MIN_OTHER_PERSONA_COUNT = 1;
+
+    /**
+     * N:1 면접의 기술 외 면접관 수 상한.
+     *
+     * <p>분석 서버 {@code /questions/tailor/multi}가 otherPersonas를 네 명까지만 받는다. 더 보내면
+     * 422로 거부당하는데, 그 실패는 면접 시작을 누른 뒤에야 드러난다. 여기서 막아 생성 시점에
+     * 알린다. 상한을 올리려면 분석 서버 계약이 먼저 넓어져야 한다.
+     */
+    private static final int MAX_OTHER_PERSONA_COUNT = 4;
 
     private final InterviewRepository interviewRepository;
     private final QuestionRepository questionRepository;
@@ -97,7 +102,7 @@ public class InterviewService {
     }
 
     /**
-     * N:1 면접 생성. 기술 면접관 한 명에 다른 직책이 한 명씩 더 붙는다.
+     * N:1 면접 생성. 기술 면접관 한 명에 다른 직책이 한 명 이상 붙고, 몇 명이 붙는지는 사용자가 고른다.
      *
      * <p>진행 순서는 기술 면접관이 먼저고, 나머지는 요청에 담긴 순서를 그대로 따른다. 질문 배열도
      * 이 순서를 따르고, 꼬리질문이 부모 질문 바로 뒤에 삽입되므로 한 면접관의 질문 묶음이 끝나야
@@ -143,9 +148,13 @@ public class InterviewService {
      * 진행 순서를 정한다. 기술 면접관이 맨 앞이고 나머지는 요청 순서 그대로다.
      *
      * <p>기술 면접관이 없으면 다시 쓸 원질문을 맡을 사람이 없고, 같은 직책이 둘이면 슬롯이
-     * 겹쳐 면접이 성립하지 않는다. 인원이 {@link #OTHER_PERSONA_COUNT}명에서 어긋나도 문항 수가
-     * 정해진 여섯에서 벗어난다. 셋 다 생성 시점에 막는다 — 여기를 지나면 질문을 만드는 쪽에서는
-     * 이미 구성이 맞다고 보고 문항을 나눈다.
+     * 겹쳐 면접이 성립하지 않는다. 기술 외 인원이
+     * {@link #MIN_OTHER_PERSONA_COUNT}..{@link #MAX_OTHER_PERSONA_COUNT}명을 벗어나도 면접을 열 수
+     * 없다. 셋 다 생성 시점에 막는다 — 여기를 지나면 질문을 만드는 쪽에서는 이미 구성이 맞다고
+     * 보고 문항을 나눈다.
+     *
+     * <p>인원이 곧 문항 수다. 기술 면접관이 두 문항, 나머지가 한 명당 두 문항을 맡아 N:1 면접은
+     * 네 문항에서 열 문항 사이가 된다 — {@code QuestionTailorService.OTHER_QUESTION_COUNT} 참고.
      */
     private List<PersonaEntity> orderForMulti(List<PersonaEntity> personas) {
         List<PersonaEntity> tech = personas.stream()
@@ -158,9 +167,9 @@ public class InterviewService {
         List<PersonaEntity> others = personas.stream()
                 .filter(persona -> persona.getRole() != Role.TECH)
                 .toList();
-        if (others.size() != OTHER_PERSONA_COUNT) {
-            throw BusinessException.unprocessable(
-                    "N:1 면접에는 기술 외 면접관을 " + OTHER_PERSONA_COUNT + "명 지정해야 합니다.");
+        if (others.size() < MIN_OTHER_PERSONA_COUNT || others.size() > MAX_OTHER_PERSONA_COUNT) {
+            throw BusinessException.unprocessable("N:1 면접에는 기술 외 면접관을 "
+                    + MIN_OTHER_PERSONA_COUNT + "명 이상 " + MAX_OTHER_PERSONA_COUNT + "명 이하로 지정해야 합니다.");
         }
 
         Set<Role> seen = EnumSet.noneOf(Role.class);

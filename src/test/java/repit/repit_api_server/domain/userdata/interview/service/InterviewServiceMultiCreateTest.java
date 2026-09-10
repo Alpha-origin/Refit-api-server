@@ -43,7 +43,7 @@ import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
-/** N:1 면접은 기술 면접관 한 명에 다른 직책이 한 명씩 붙고, 진행 순서는 기술이 먼저다. */
+/** N:1 면접은 기술 면접관 한 명에 다른 직책이 한 명 이상 붙고, 진행 순서는 기술이 먼저다. */
 @ExtendWith(MockitoExtension.class)
 @MockitoSettings(strictness = Strictness.LENIENT)
 class InterviewServiceMultiCreateTest {
@@ -123,30 +123,56 @@ class InterviewServiceMultiCreateTest {
         assertThat(savedMembers.getValue().getFirst().getInterviewId()).isEqualTo(3L);
     }
 
+    /** 기술 외 한 명이면 면접관이 한 번은 교대한다. 그것이 N:1의 최소 구성이다. */
     @Test
-    void 기술_외_면접관이_한_명뿐이면_422다() {
-        // 인원이 곧 문항 수다. 두 명에서 하나라도 어긋나면 N:1이 정해진 여섯 문항으로 열리지 않는다.
+    void 기술_외_면접관이_한_명이면_두_명짜리_N대1로_열린다() {
         when(personaRepository.findAllById(List.of(11L, 12L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(12L, Role.HR)));
 
-        assertThatThrownBy(() -> service.createInterview("Bearer t",
-                new CreateInterviewRequest(null, null, List.of(11L, 12L))))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getStatus())
-                .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
+        InterviewResponse response = service.createInterview("Bearer t",
+                new CreateInterviewRequest(null, null, List.of(11L, 12L)));
 
-        verify(interviewRepository, never()).save(any());
+        assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
+        assertThat(response.getPersonaIds()).containsExactly(11L, 12L);
     }
 
+    /** 분석 서버가 otherPersonas를 네 명까지 받는다. 그 상한까지는 그대로 열려야 한다. */
     @Test
-    void 기술_외_면접관이_셋이면_422다() {
-        when(personaRepository.findAllById(List.of(11L, 12L, 13L, 15L))).thenReturn(List.of(
+    void 기술_외_면접관이_넷이면_다섯_명짜리_N대1로_열린다() {
+        when(personaRepository.findAllById(List.of(12L, 13L, 15L, 16L, 11L))).thenReturn(List.of(
+                persona(12L, Role.HR), persona(13L, Role.CEO), persona(15L, Role.PM),
+                persona(16L, Role.DESIGN), persona(11L, Role.TECH)));
+
+        InterviewResponse response = service.createInterview("Bearer t",
+                new CreateInterviewRequest(null, null, List.of(12L, 13L, 15L, 16L, 11L)));
+
+        assertThat(response.getMode()).isEqualTo(InterviewMode.MULTI);
+        // 기술 면접관만 맨 앞으로 올라오고 나머지는 고른 순서 그대로다.
+        assertThat(response.getPersonaIds()).containsExactly(11L, 12L, 13L, 15L, 16L);
+
+        verify(interviewPersonaRepository).saveAll(savedMembers.capture());
+        assertThat(savedMembers.getValue()).extracting(InterviewPersonaEntity::getPersonaOrder)
+                .containsExactly(0, 1, 2, 3, 4);
+    }
+
+    /**
+     * 분석 서버는 otherPersonas가 넷을 넘으면 요청을 422로 거부한다. 그 실패는 면접 시작을 누른
+     * 뒤에야 드러나므로, 면접을 만들 때 막는다.
+     *
+     * <p>지금은 기술 외 직책이 네 가지뿐이라 다섯 명이면 직책도 반드시 겹친다. 그래도 걸러야
+     * 하는 것은 인원이므로, 인원 사유로 막혔는지를 메시지로 확인한다 — 직책이 늘어나 겹치지
+     * 않게 되어도 이 상한은 그대로 남아야 한다.
+     */
+    @Test
+    void 기술_외_면접관이_다섯이면_422다() {
+        when(personaRepository.findAllById(List.of(11L, 12L, 13L, 15L, 16L, 17L))).thenReturn(List.of(
                 persona(11L, Role.TECH), persona(12L, Role.HR), persona(13L, Role.CEO),
-                persona(15L, Role.PM)));
+                persona(15L, Role.PM), persona(16L, Role.DESIGN), persona(17L, Role.HR)));
 
         assertThatThrownBy(() -> service.createInterview("Bearer t",
-                new CreateInterviewRequest(null, null, List.of(11L, 12L, 13L, 15L))))
+                new CreateInterviewRequest(null, null, List.of(11L, 12L, 13L, 15L, 16L, 17L))))
                 .isInstanceOf(BusinessException.class)
+                .hasMessageContaining("1명 이상 4명 이하")
                 .extracting(e -> ((BusinessException) e).getStatus())
                 .isEqualTo(HttpStatus.UNPROCESSABLE_CONTENT);
 
