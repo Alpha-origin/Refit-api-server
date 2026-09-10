@@ -81,7 +81,7 @@ public class QuestionTailorService {
 
     // 기술 면접관이 맡을 문항 수. 원질문을 다 쓰면 다른 면접관 몫까지 더해져 면접이 너무 길어진다.
     private static final int TECH_QUESTION_COUNT = 2;
-    // 기술 외 면접관 한 명이 맡을 문항 수. 분석 서버 기본값과 같다.
+    // 기술 외 면접관 한 명이 맡을 문항 수. 분석 서버 기본값과 같다. 면접관이 늘면 이만큼씩 늘어난다.
     private static final int OTHER_QUESTION_COUNT = 2;
 
     private final QuestionTailorRepository questionTailorRepository;
@@ -204,8 +204,8 @@ public class QuestionTailorService {
      *
      * <p>원질문을 전부 넘기지는 않는다. 다 쓰면 다른 면접관 몫이 더해져 면접이 너무 길어진다.
      * 기술 면접관 몫인 {@link #TECH_QUESTION_COUNT}개는 {@link #loadOriginalQuestions}가 이미 골라 넘겨준다.
-     * 나머지 면접관은 두 명이 {@link #OTHER_QUESTION_COUNT} 문항씩 맡아, N:1 면접은 언제나 여섯 문항이 된다 —
-     * 면접관 구성은 {@code InterviewService.orderForMulti}가 고정한다.
+     * 나머지 면접관은 한 명당 {@link #OTHER_QUESTION_COUNT} 문항씩 맡으므로, 면접 길이는 면접관 수를
+     * 따라간다 — 인원 범위는 {@code InterviewService.orderForMulti}가 정한다.
      */
     private QuestionTailorEntity requestMultiTailor(InterviewEntity interview, UserResponse user,
                                                     SourceQuestions source) {
@@ -239,7 +239,7 @@ public class QuestionTailorService {
                 .jobId(accepted == null ? null : accepted.getJobId())
                 .analysisJobId(source.analysisJobId())
                 .status(TailorStatus.PENDING)
-                // 기술 면접관에게 넘긴 원질문만 남는다. 나머지 4문항은 아직 존재하지 않는다.
+                // 기술 면접관에게 넘긴 원질문만 남는다. 나머지 면접관 몫은 아직 존재하지 않는다.
                 .sourceQuestions(techQuestions)
                 .chatDelivered(false)
                 .build());
@@ -248,8 +248,10 @@ public class QuestionTailorService {
     /**
      * 면접 진행 순서대로 정리한 면접관.
      *
-     * <p>맨 앞은 반드시 기술 면접관이다. 원질문을 맡을 자리가 거기뿐이라, 없으면 요청을 만들 수 없다.
-     * 면접 생성에서 이미 걸러지지만 그 사이에 면접관이 지워질 수 있어 여기서도 확인한다.
+     * <p>맨 앞은 반드시 기술 면접관이고, 뒤에 다른 직책이 한 명 이상 붙는다. 원질문을 맡을 자리가
+     * 기술 면접관뿐이라 그가 없으면 요청을 만들 수 없고, 뒤가 비면 신규 질문을 맡을 면접관이 없어
+     * N:1이 성립하지 않는다. 면접 생성에서 이미 걸러지지만 그 사이에 면접관이 지워질 수 있어
+     * 여기서도 확인한다. 인원 상한은 생성 시점에만 본다 — 지워져서 줄어들 뿐 늘지는 않는다.
      */
     private List<PersonaEntity> orderedPersonas(Long interviewId) {
         List<Long> personaIds = interviewPersonaRepository
@@ -744,9 +746,9 @@ public class QuestionTailorService {
     /**
      * 분석 서버가 N:1 질문 구성을 마치고 보내는 콜백.
      *
-     * <p>1:1과 달리 폴백이 없다. 신규 질문 4개는 여기서 받은 값이 유일한 원본이라, 실패하면
-     * 면접에 쓸 질문이 남지 않는다. 그 경우 채팅 서버로 넘기지 않고 실패로 남긴다 —
-     * 반쪽짜리로 넘기면 기술 질문 2개짜리 면접이 N:1인 척 열린다.
+     * <p>1:1과 달리 폴백이 없다. 기술 외 면접관 몫의 신규 질문은 여기서 받은 값이 유일한 원본이라,
+     * 실패하면 면접에 쓸 질문이 남지 않는다. 그 경우 채팅 서버로 넘기지 않고 실패로 남긴다 —
+     * 반쪽짜리로 넘기면 기술 질문 {@link #TECH_QUESTION_COUNT}개짜리 면접이 N:1인 척 열린다.
      */
     public void handleMultiCallback(QuestionTailorMultiCallbackRequest request) {
         QuestionTailorEntity tailor = findMultiTarget(request);
@@ -904,8 +906,9 @@ public class QuestionTailorService {
     /**
      * 폴백 없이 실패로 닫는다. N:1 전용이다.
      *
-     * <p>기술 원질문 2개는 남아 있지만 그것만으로 면접을 열면 N:1이 아니다. 면접관 대부분이
-     * 질문 없이 앉아 있게 되고, 사용자는 왜 그런지 알 길이 없다. 열지 않는 편이 낫다.
+     * <p>기술 원질문 {@link #TECH_QUESTION_COUNT}개는 남아 있지만 그것만으로 면접을 열면 N:1이
+     * 아니다. 기술 면접관을 뺀 나머지가 질문 없이 앉아 있게 되고, 사용자는 왜 그런지 알 길이
+     * 없다. 열지 않는 편이 낫다.
      */
     private void failWithoutFallback(QuestionTailorEntity tailor, String errorMessage) {
         tailor.setStatus(TailorStatus.FAILED);
