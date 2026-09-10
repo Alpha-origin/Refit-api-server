@@ -16,8 +16,11 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.Mockito.when;
 
 /**
- * 소유자 확인은 결과를 읽지 않고 소유자만 읽는다. 그 프로젝션이 "없는 작업"과
- * "소유자가 붙지 않은 작업"을 같은 빈 결과로 뭉개지 않는지 확인한다.
+ * 읽어온 소유자에 따라 서비스가 어떻게 갈라지는지 확인한다.
+ *
+ * <p>여기서 보는 것은 분기뿐이다. 리포지토리를 스텁하므로 Spring Data가 프로젝션을 어떻게
+ * 읽어오는지는 이 테스트의 전제로 깔린다 — 그 매핑이 "없는 행"과 "소유자가 비어 있는 행"을
+ * 실제로 가르는지는 {@code AnalysisDataRepositoryFindOwnerTest}가 DB에 대고 본다.
  *
  * <p>둘을 섞으면 모르는 jobId가 403으로, 소유자 없는 분석이 404로 나간다. 앞은 남의 작업이
  * 있는지 없는지를 알려주고, 뒤는 접수가 틀어진 것을 잘못된 jobId로 보이게 해 원인을 가린다.
@@ -63,7 +66,7 @@ class AiMetaDataServiceVerifyOwnerTest {
                 .isEqualTo(HttpStatus.FORBIDDEN);
     }
 
-    // 소유자만 고르는 프로젝션이라 여기서 404와 403이 갈리는지가 중요하다.
+    // 모르는 작업은 404다. 소유권을 먼저 보면 없는 작업까지 403이 되어 원인이 가려진다.
     @Test
     void 모르는_작업은_찾을_수_없다고_알린다() {
         when(analysisDataRepository.findOwner("없는-job")).thenReturn(Optional.empty());

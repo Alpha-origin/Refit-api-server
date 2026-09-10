@@ -18,8 +18,14 @@ public interface AnalysisDataRepository extends JpaRepository<AnalysisDataEntity
     /**
      * 소유자 확인에만 쓰는 값.
      *
-     * <p>jobId까지 같이 고르는 것은 행이 없는 것과 소유자가 비어 있는 것을 가리기 위해서다.
-     * userId 하나만 고르면 둘 다 빈 결과로 돌아와, 모르는 작업을 소유자 없는 작업으로 잘못 본다.
+     * <p>jobId까지 같이 고르는 것은 행이 없는 것과 소유자가 비어 있는 것을 확실히 가르기 위해서다.
+     * 둘이 섞이면 모르는 작업이 403으로, 소유자가 붙지 않은 분석이 404로 나간다. 앞은 남의 작업이
+     * 있는지 없는지를 알려주고, 뒤는 접수가 틀어진 것을 잘못된 jobId처럼 보이게 해 원인을 가린다.
+     *
+     * <p>userId 하나만 골라도 구분이 되는지는 Spring Data가 한 칼럼짜리 프로젝션을 어떻게 읽느냐에
+     * 달려 있다. 스칼라로 받으면 값이 null인 행과 없는 행이 같은 빈 Optional이 되고, 투영 프록시로
+     * 받으면 갈린다. 그 동작에 기대지 않으려고 칼럼을 하나 더 고른다 — 같은 행을 읽는 값이라
+     * 비용이 늘지 않는다. 실제로 갈리는지는 AnalysisDataRepositoryFindOwnerTest가 DB에 대고 본다.
      */
     interface AnalysisOwner {
         String getJobId();
