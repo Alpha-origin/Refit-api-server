@@ -180,8 +180,9 @@ public class AiMetaDataController {
             @RequestHeader("Authorization") String authorization,
             @RequestParam String jobId
     ) {
-        // 분석 결과에는 질문의 기대 답변이 그대로 들어 있다. 본인 것만 내려준다.
-        aiMetaDataService.verifyOwner(jobId, currentUser.require(authorization).getId());
-        return ApiResponse.success(aiMetaDataService.getResult(jobId));
+        // 소유자 확인은 조회와 같은 트랜잭션에서 한다. 따로 부르면 같은 행을 두 번 읽으며
+        // result jsonb를 두 번 풀어낸다.
+        Long userId = currentUser.require(authorization).getId();
+        return ApiResponse.success(aiMetaDataService.getResultForOwner(jobId, userId));
     }
 }

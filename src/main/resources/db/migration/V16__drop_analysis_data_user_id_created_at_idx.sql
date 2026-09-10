@@ -1,0 +1,15 @@
+-- V2가 만든 인덱스를 걷어낸다. V15의 인덱스가 그 일을 대신하면서 읽는 쪽이 없어졌다.
+--
+-- analysis_data를 user_id로 좁히는 조회는 AnalysisDataRepository.findLatestCompleted 하나뿐이고,
+-- 그것이 이제 analysis_data_owner_latest_completed_idx를 탄다. 나머지 조회와 갱신은 모두
+-- job_id(기본키) 기준이고, created_at으로 줄을 세우는 곳은 없다. 남겨두면 이 테이블에 쓰기가
+-- 날 때마다 아무도 읽지 않는 인덱스를 갱신하는 비용만 낸다.
+--
+-- V15에 함께 넣지 않고 따로 둔 이유를 적어둔다. V15는 이미 적용된 마이그레이션이다 —
+-- 이 프로젝트의 @SpringBootTest가 개발 DB에 붙어 기동할 때 Flyway가 돌기 때문에, 머지 전이라도
+-- 적용되어 있다. 거기에 문장을 덧붙이면 체크섬이 어긋나 그 DB에서 컨텍스트가 아예 뜨지 않는다.
+--
+-- 다시 필요해질 경우를 적어둔다. V15의 인덱스는 result가 채워진 행만 담는 부분 인덱스다.
+-- 끝나지 않은 분석까지 포함해 user_id로 훑는 조회가 생기면(예: 사용자의 진행 중인 분석 목록)
+-- 그 조회는 쓸 수 없으니, 그때 필요한 모양으로 새로 만드는 편이 맞다.
+DROP INDEX IF EXISTS analysis_data_user_id_created_at_idx;

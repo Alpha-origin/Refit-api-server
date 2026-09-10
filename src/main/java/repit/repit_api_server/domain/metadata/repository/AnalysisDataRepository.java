@@ -15,6 +15,34 @@ import java.util.Optional;
 
 public interface AnalysisDataRepository extends JpaRepository<AnalysisDataEntity, String> {
 
+    /**
+     * 소유자 확인에만 쓰는 값.
+     *
+     * <p>jobId까지 같이 고르는 것은 행이 없는 것과 소유자가 비어 있는 것을 확실히 가르기 위해서다.
+     * 둘이 섞이면 모르는 작업이 403으로, 소유자가 붙지 않은 분석이 404로 나간다. 앞은 남의 작업이
+     * 있는지 없는지를 알려주고, 뒤는 접수가 틀어진 것을 잘못된 jobId처럼 보이게 해 원인을 가린다.
+     *
+     * <p>userId 하나만 골라도 구분이 되는지는 Spring Data가 한 칼럼짜리 프로젝션을 어떻게 읽느냐에
+     * 달려 있다. 스칼라로 받으면 값이 null인 행과 없는 행이 같은 빈 Optional이 되고, 투영 프록시로
+     * 받으면 갈린다. 그 동작에 기대지 않으려고 칼럼을 하나 더 고른다 — 같은 행을 읽는 값이라
+     * 비용이 늘지 않는다. 실제로 갈리는지는 AnalysisDataRepositoryFindOwnerTest가 DB에 대고 본다.
+     */
+    interface AnalysisOwner {
+        String getJobId();
+
+        Long getUserId();
+    }
+
+    /**
+     * 소유자만 읽는다. 엔티티를 불러오면 result jsonb까지 따라온다.
+     *
+     * <p>그 값은 이 테이블에서 가장 무겁다 — 포트폴리오 요약과 면접 질문 전체가 들어 있어,
+     * Postgres가 TOAST에서 꺼내 오고 Hibernate가 Map으로 풀어낸다. 소유자를 견주는 데는
+     * Long 하나면 되는데 구독과 결과 조회가 매번 그 비용을 냈다.
+     */
+    @Query("select a.jobId as jobId, a.userId as userId from AnalysisDataEntity a where a.jobId = :jobId")
+    Optional<AnalysisOwner> findOwner(@Param("jobId") String jobId);
+
     /** 분석이 끝난(result가 채워진) 가장 최근 작업. */
     default Optional<AnalysisDataEntity> findLatestCompleted(Long userId) {
         return findLatestCompleted(userId, PageRequest.of(0, 1)).stream().findFirst();

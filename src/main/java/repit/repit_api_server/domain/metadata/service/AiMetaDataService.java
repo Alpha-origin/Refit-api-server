@@ -150,17 +150,25 @@ public class AiMetaDataService {
      *
      * <p>소유자가 비어 있는 행은 접수 응답을 받지 못해 사용자를 붙이지 못한 분석이다.
      * 누구 것인지 모르는 자료라 아무에게도 내주지 않는다.
+     *
+     * <p>여기서는 소유자만 읽는다. 구독은 결과를 쓰지 않는데, 엔티티를 불러오면 result jsonb가
+     * 딸려 와 읽지도 않을 값을 풀어내는 데 시간을 쓴다.
      */
     @Transactional(readOnly = true)
     public void verifyOwner(String jobId, Long userId) {
-        AnalysisDataEntity data = analysisDataRepository.findById(jobId)
+        AnalysisDataRepository.AnalysisOwner owner = analysisDataRepository.findOwner(jobId)
                 .orElseThrow(() -> BusinessException.notFound("분석 결과를 찾을 수 없습니다. jobId=" + jobId));
 
-        if (data.getUserId() == null) {
+        verifyOwner(jobId, owner.getUserId(), userId);
+    }
+
+    /** 소유자를 견주는 기준. 어디서 읽어 왔든 같은 판정을 거치게 한다. */
+    private void verifyOwner(String jobId, Long ownerId, Long requesterId) {
+        if (ownerId == null) {
             log.warn("소유자가 붙지 않은 분석을 조회하려 했습니다. jobId={}", jobId);
             throw BusinessException.forbidden("본인의 분석 결과만 볼 수 있습니다.");
         }
-        if (!data.getUserId().equals(userId)) {
+        if (!ownerId.equals(requesterId)) {
             throw BusinessException.forbidden("본인의 분석 결과만 볼 수 있습니다.");
         }
     }
@@ -222,11 +230,21 @@ public class AiMetaDataService {
      * <p>모르는 jobId를 빈 결과로 돌려주지 않는다. 그러면 호출자는 "아직 끝나지 않은 분석"과
      * "존재하지 않는 작업"을 똑같은 {@code result: null}로 받아, 잘못된 jobId로 조회하고 있다는
      * 사실을 알 수 없다. 아직 결과가 없는 경우도 상태를 함께 실어 이유가 드러나게 한다.
+     *
+     * <p>소유자 확인을 여기서 함께 한다. 확인과 조회를 따로 부르면 트랜잭션이 둘로 갈려
+     * 영속성 컨텍스트를 공유하지 못하고, 같은 행을 두 번 읽으며 result jsonb를 두 번 풀어낸다.
+     * 한 트랜잭션에서 한 번 읽어 두 일을 같이 끝낸다.
+     *
+     * <p>견주는 순서는 그대로다 — 모르는 작업은 404, 남의 작업은 403. 소유권을 먼저 보면
+     * 없는 작업까지 403이 되어, 잘못된 jobId로 조회하는 중인지 알 수 없다.
      */
     @Transactional(readOnly = true)
-    public ResultResponse getResult(String jobId) {
+    public ResultResponse getResultForOwner(String jobId, Long userId) {
         AnalysisDataEntity data = analysisDataRepository.findById(jobId)
                 .orElseThrow(() -> BusinessException.notFound("분석 결과를 찾을 수 없습니다. jobId=" + jobId));
+
+        // 분석 결과에는 질문의 기대 답변이 그대로 들어 있다. 본인 것만 내려준다.
+        verifyOwner(jobId, data.getUserId(), userId);
 
         if (data.getResult() == null) {
             log.warn("결과가 아직 없는 분석을 조회했습니다. jobId={}, status={}", jobId, data.getStatus());
