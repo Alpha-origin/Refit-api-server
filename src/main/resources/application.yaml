@@ -8,6 +8,18 @@ spring:
       max-request-size: 500MB
 
   task:
+    execution:
+      # applicationTaskExecutor 자동설정을 살려둔다.
+      #
+      # Boot는 그 빈을 @ConditionalOnMissingBean(Executor.class) 또는 이 값이 force일 때만 만든다.
+      # 이 앱에는 Executor 타입 빈이 하나도 없어서 자동설정이 늘 걸렸는데, SSE ping용
+      # ThreadPoolTaskExecutor를 등록하면서 조건이 깨졌다. 그대로 두면 MVC async가
+      # SimpleAsyncTaskExecutor 폴백으로 내려가고 아래 pool 설정이 조용히 무의미해진다.
+      #
+      # 지금은 @Async도 Callable/StreamingResponseBody/DeferredResult 반환도 없어 당장 깨지는 것은
+      # 없다. 나중에 @Async 하나가 붙는 순간 호출마다 새 스레드가 뜨는데, 그때 원인을 여기까지
+      # 되짚기는 어렵다. 한 줄로 막아둔다.
+      mode: force
     scheduling:
       pool:
         # @Scheduled 작업이 나눠 쓰는 스레드 수. 정하지 않으면 1이라 모든 주기 작업이 한 줄로 선다.
