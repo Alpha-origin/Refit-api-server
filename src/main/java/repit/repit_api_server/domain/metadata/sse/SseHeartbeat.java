@@ -45,6 +45,10 @@ public class SseHeartbeat {
      * <p>jobId가 아니라 구독 자체를 센다. jobId로 세면 다시 붙은 새 구독이 앞 구독의 막힌
      * ping 때문에 ping을 받지 못한다. {@link SseEmitter}는 동등성을 재정의하지 않아 여기서는
      * 객체가 같은지로만 가린다 — 바라는 바다.
+     *
+     * <p>구독을 들고 있지만 늘어나지는 않는다. 들어온 구독은 ping이 끝나는 자리에서 반드시
+     * 걷히고, 구독마다 하나까지만 띄우므로 동시에 담기는 수는 띄워둔 ping 수를 넘지 못한다 —
+     * 곧 스레드 수와 큐 크기의 합이 한계다. 막힌 구독이 오래 남아도 그 상한 안에 머문다.
      */
     private final Set<SseSubscription> pinging = Collections.newSetFromMap(new ConcurrentHashMap<>());
 
@@ -64,14 +68,18 @@ public class SseHeartbeat {
      *
      * <p>띄우지 못한 ping은 흘려보낸다. 다음 틱에 다시 나가므로 여기서 붙잡고 기다릴 이유가 없다 —
      * 기다리면 순회하는 스레드가 막혀 떼어둔 뜻이 없어진다.
+     *
+     * <p>어떤 실패도 밖으로 내보내지 않는다. 여기서 예외가 새어나가면 순회가 통째로 멈춰,
+     * 그 뒤 순서의 구독들이 그 틱의 ping을 받지 못한다. 한 구독을 띄우다 난 일이 나머지를
+     * 끌고 들어가지 않게 한다.
      */
     private void schedulePing(String jobId, SseSubscription emitter) {
-        if (!pinging.add(emitter)) {
-            // 앞 틱의 ping이 아직 이 구독에서 끝나지 않았다. 덧붙이면 막힌 구독에만 쌓인다.
-            return;
-        }
-
         try {
+            if (!pinging.add(emitter)) {
+                // 앞 틱의 ping이 아직 이 구독에서 끝나지 않았다. 덧붙이면 막힌 구독에만 쌓인다.
+                return;
+            }
+
             pingExecutor.execute(() -> {
                 try {
                     ping(jobId, emitter);
@@ -80,7 +88,7 @@ public class SseHeartbeat {
                 }
             });
         } catch (RuntimeException e) {
-            // 큐가 찼다. 표시를 걷어내지 않으면 이 구독은 다시는 ping을 받지 못한다.
+            // 큐가 찼거나 띄우는 도중 실패했다. 표시를 걷어내지 않으면 이 구독은 다시는 ping을 받지 못한다.
             pinging.remove(emitter);
             log.debug("ping을 띄우지 못해 다음 차례로 넘깁니다. jobId={}, 원인: {}", jobId, e.toString());
         }

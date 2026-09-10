@@ -20,6 +20,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 
 /**
@@ -182,6 +183,54 @@ class SseHeartbeatTest {
         queueing.ping();
 
         assertThat(queued).hasSize(2);
+    }
+
+    /**
+     * ping을 띄운 뒤 같은 jobId에 구독이 다시 붙을 수 있다. 뒤늦게 도착한 ping이 죽은 옛 구독을
+     * 보고 jobId만으로 걷어내면, 방금 붙은 구독이 밀려나 정작 콜백이 왔을 때 흘려보낼 곳이 없다.
+     */
+    @Test
+    void 뒤늦은_ping은_그_사이_다시_붙은_구독을_밀어내지_않는다() throws IOException {
+        List<Runnable> queued = new ArrayList<>();
+        SseHeartbeat queueing = new SseHeartbeat(repository, queued::add);
+
+        // 떠난 구독이다. 쓰면 터진다.
+        SseSubscription gone = mock(SseSubscription.class);
+        doThrow(new IOException("Broken pipe")).when(gone).send(any(SseEmitter.SseEventBuilder.class));
+        repository.save("job-14", gone);
+
+        queueing.ping();
+
+        // ping이 날아가 있는 동안 같은 작업에 새 구독이 붙었다.
+        SseSubscription reconnected = mock(SseSubscription.class);
+        repository.save("job-14", reconnected);
+
+        // 이제야 옛 구독의 ping이 실행된다.
+        queued.getFirst().run();
+
+        assertThat(repository.get("job-14")).isSameAs(reconnected);
+        verify(reconnected, never()).complete();
+    }
+
+    /** 한 구독을 띄우다 실패해도 순회가 멈추면 안 된다. 멈추면 뒤 구독들이 그 틱의 ping을 잃는다. */
+    @Test
+    void 한_구독을_띄우다_실패해도_나머지는_띄운다() {
+        repository.save("job-15", mock(SseSubscription.class));
+        repository.save("job-16", mock(SseSubscription.class));
+
+        AtomicInteger attempts = new AtomicInteger();
+        // 처음 한 번만 터뜨린다. 순회 순서는 보장되지 않으므로 어느 쪽이 먼저 걸리든 결과는 같아야 한다.
+        Executor flakyOnFirst = task -> {
+            if (attempts.getAndIncrement() == 0) {
+                throw new IllegalStateException("띄우다 실패");
+            }
+            task.run();
+        };
+
+        assertThatCode(new SseHeartbeat(repository, flakyOnFirst)::ping).doesNotThrowAnyException();
+
+        // 두 구독 모두 띄우기를 시도했다 — 첫 실패에 순회가 멈추지 않았다.
+        assertThat(attempts).hasValue(2);
     }
 
     /** 띄우지 못한 ping은 다음 틱에 다시 나가야 한다. 표시가 남으면 그 구독은 영영 ping을 잃는다. */
