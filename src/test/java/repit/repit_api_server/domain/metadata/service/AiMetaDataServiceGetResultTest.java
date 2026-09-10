@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.http.HttpStatus;
 import repit.repit_api_server.domain.metadata.dto.response.ResultResponse;
 import repit.repit_api_server.domain.metadata.entity.AnalysisDataEntity;
 import repit.repit_api_server.domain.metadata.entity.enums.AnalysisStatus;
@@ -44,7 +45,7 @@ class AiMetaDataServiceGetResultTest {
                 .result(Map.of("project_summary", "요약"))
                 .build()));
 
-        ResultResponse response = service.getResult("job-1");
+        ResultResponse response = service.getResultForOwner("job-1", 7L);
 
         assertThat(response.getJobId()).isEqualTo("job-1");
         assertThat(response.getStatus()).isEqualTo("succeeded");
@@ -61,7 +62,7 @@ class AiMetaDataServiceGetResultTest {
                 .status(AnalysisStatus.PENDING)
                 .build()));
 
-        ResultResponse response = service.getResult("job-2");
+        ResultResponse response = service.getResultForOwner("job-2", 7L);
 
         assertThat(response.getStatus()).isEqualTo("pending");
         assertThat(response.getResult()).isNull();
@@ -77,7 +78,7 @@ class AiMetaDataServiceGetResultTest {
                 .errorMessage("PDF를 읽을 수 없습니다.")
                 .build()));
 
-        ResultResponse response = service.getResult("job-3");
+        ResultResponse response = service.getResultForOwner("job-3", 7L);
 
         assertThat(response.getStatus()).isEqualTo("failed");
         assertThat(response.getResult()).isNull();
@@ -90,8 +91,44 @@ class AiMetaDataServiceGetResultTest {
     void 모르는_작업은_찾을_수_없다고_알린다() {
         when(analysisDataRepository.findById("없는-job")).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.getResult("없는-job"))
+        assertThatThrownBy(() -> service.getResultForOwner("없는-job", 7L))
                 .isInstanceOf(BusinessException.class)
-                .hasMessageContaining("없는-job");
+                .hasMessageContaining("없는-job")
+                .extracting("status")
+                .isEqualTo(HttpStatus.NOT_FOUND);
+    }
+
+    /**
+     * 소유자 확인이 조회와 한 트랜잭션으로 합쳐졌다. 합치면서 빠지기 쉬운 자리라 여기서 잡아둔다 —
+     * 분석 결과에는 질문의 기대 답변이 그대로 들어 있어 남에게 내주면 채점 기준이 새어나간다.
+     */
+    @Test
+    void 남의_분석_결과는_내주지_않는다() {
+        when(analysisDataRepository.findById("job-4")).thenReturn(Optional.of(AnalysisDataEntity.builder()
+                .jobId("job-4")
+                .userId(7L)
+                .status(AnalysisStatus.SUCCEEDED)
+                .result(Map.of("project_summary", "요약"))
+                .build()));
+
+        assertThatThrownBy(() -> service.getResultForOwner("job-4", 8L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.FORBIDDEN);
+    }
+
+    // 소유자가 붙지 않은 행은 접수 응답을 받지 못해 사용자를 기록하지 못한 분석이다.
+    @Test
+    void 소유자가_붙지_않은_분석은_아무에게도_내주지_않는다() {
+        when(analysisDataRepository.findById("job-5")).thenReturn(Optional.of(AnalysisDataEntity.builder()
+                .jobId("job-5")
+                .status(AnalysisStatus.SUCCEEDED)
+                .result(Map.of("project_summary", "요약"))
+                .build()));
+
+        assertThatThrownBy(() -> service.getResultForOwner("job-5", 7L))
+                .isInstanceOf(BusinessException.class)
+                .extracting("status")
+                .isEqualTo(HttpStatus.FORBIDDEN);
     }
 }

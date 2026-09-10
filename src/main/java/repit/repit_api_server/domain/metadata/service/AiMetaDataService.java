@@ -230,11 +230,21 @@ public class AiMetaDataService {
      * <p>모르는 jobId를 빈 결과로 돌려주지 않는다. 그러면 호출자는 "아직 끝나지 않은 분석"과
      * "존재하지 않는 작업"을 똑같은 {@code result: null}로 받아, 잘못된 jobId로 조회하고 있다는
      * 사실을 알 수 없다. 아직 결과가 없는 경우도 상태를 함께 실어 이유가 드러나게 한다.
+     *
+     * <p>소유자 확인을 여기서 함께 한다. 확인과 조회를 따로 부르면 트랜잭션이 둘로 갈려
+     * 영속성 컨텍스트를 공유하지 못하고, 같은 행을 두 번 읽으며 result jsonb를 두 번 풀어낸다.
+     * 한 트랜잭션에서 한 번 읽어 두 일을 같이 끝낸다.
+     *
+     * <p>견주는 순서는 그대로다 — 모르는 작업은 404, 남의 작업은 403. 소유권을 먼저 보면
+     * 없는 작업까지 403이 되어, 잘못된 jobId로 조회하는 중인지 알 수 없다.
      */
     @Transactional(readOnly = true)
-    public ResultResponse getResult(String jobId) {
+    public ResultResponse getResultForOwner(String jobId, Long userId) {
         AnalysisDataEntity data = analysisDataRepository.findById(jobId)
                 .orElseThrow(() -> BusinessException.notFound("분석 결과를 찾을 수 없습니다. jobId=" + jobId));
+
+        // 분석 결과에는 질문의 기대 답변이 그대로 들어 있다. 본인 것만 내려준다.
+        verifyOwner(jobId, data.getUserId(), userId);
 
         if (data.getResult() == null) {
             log.warn("결과가 아직 없는 분석을 조회했습니다. jobId={}, status={}", jobId, data.getStatus());
