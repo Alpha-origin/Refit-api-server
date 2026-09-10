@@ -35,6 +35,9 @@ public class SchedulingConfig {
         executor.setThreadNamePrefix("sse-ping-");
         // 내려갈 때 막힌 write를 기다리지 않는다. 기다리면 소켓 타임아웃만큼 종료가 늦어진다.
         executor.setWaitForTasksToCompleteOnShutdown(false);
+        // 기다리지 않는 것만으로는 모자란다. 종료는 인터럽트로 알리는데 블로킹 소켓 write는
+        // 인터럽트로 깨지지 않아, 논데몬 스레드로 두면 그 write가 끝날 때까지 JVM이 남는다.
+        executor.setDaemon(true);
         return executor;
     }
 }

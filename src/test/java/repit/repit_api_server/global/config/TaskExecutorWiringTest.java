@@ -7,6 +7,9 @@ import org.springframework.context.ApplicationContext;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskScheduler;
 
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.TimeUnit;
+
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
@@ -45,8 +48,21 @@ class TaskExecutorWiringTest {
         // 막힌 write는 인터럽트로 깨지지 않는다. 이 수만큼은 동시에 막혀 있어도 나머지 구독이 ping을 받는다.
         assertThat(executor.getCorePoolSize()).isEqualTo(8);
         assertThat(executor.getMaxPoolSize()).isEqualTo(8);
-        // 남은 write를 기다리면 종료가 소켓 타임아웃만큼 늘어진다.
         assertThat(executor.getThreadPoolExecutor().isShutdown()).isFalse();
+    }
+
+    /**
+     * 종료는 인터럽트로 알리는데 블로킹 소켓 write는 인터럽트로 깨지지 않는다.
+     * 논데몬으로 두면 그 write가 끝날 때까지 JVM이 남아 종료가 소켓 타임아웃만큼 늘어진다.
+     */
+    @Test
+    void ping_스레드는_JVM_종료를_붙잡지_않는다() throws Exception {
+        ThreadPoolTaskExecutor executor = context.getBean("ssePingExecutor", ThreadPoolTaskExecutor.class);
+
+        CompletableFuture<Boolean> daemon = new CompletableFuture<>();
+        executor.execute(() -> daemon.complete(Thread.currentThread().isDaemon()));
+
+        assertThat(daemon.get(5, TimeUnit.SECONDS)).isTrue();
     }
 
     /**

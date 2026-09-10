@@ -97,8 +97,9 @@ public class SseHeartbeat {
     /**
      * 한 구독에 빈 줄을 흘린다.
      *
-     * <p>어떤 실패든 여기서 삼킨다. 예외가 새어나가면 이 구독의 표시가 남아 다시는 ping을
-     * 받지 못한다.
+     * <p>어떤 실패든 여기서 삼킨다. 여기는 ping을 띄운 스레드가 아니라 풀의 스레드라,
+     * 예외가 새어나가면 부르는 쪽이 받지 못하고 스레드의 uncaught 처리로 넘어가 묻힌다.
+     * 떠난 구독을 걷어내는 일도 그 자리에서 같이 날아간다.
      */
     private void ping(String jobId, SseSubscription emitter) {
         try {
