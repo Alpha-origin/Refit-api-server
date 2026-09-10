@@ -112,7 +112,13 @@ management:
 
 logging:
   level:
-    # 어떤 쿼리가 나갔는지까지 흐름에 포함시킨다. 소음이 크면 이 줄만 지우면 된다.
-    org.hibernate.SQL: debug
+    # 어떤 쿼리가 나갔는지까지 흐름에 포함시킨다.
+    #
+    # 기본값을 info로 둬 운영에서는 꺼진다. 켜두면 쿼리마다 문장을 조립해 기록하는데,
+    # 그 비용을 읽는 사람이 없는 곳에서까지 낼 이유가 없다. 로그 양이 늘어 정작 봐야 할
+    # 줄이 묻히는 것도 같은 이유로 손해다.
+    #
+    # 흐름을 좇아야 할 때 SQL_LOG_LEVEL=debug로 켠다.
+    org.hibernate.SQL: ${SQL_LOG_LEVEL:info}
     # 쿼리에 실제로 바인딩된 값까지 보려면 아래 주석을 푼다. 개인정보가 그대로 찍히니 운영에서는 끈다.
     # org.hibernate.orm.jdbc.bind: trace
